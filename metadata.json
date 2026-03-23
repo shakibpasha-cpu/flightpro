@@ -1,0 +1,5 @@
+{
+  "name": "AeroPlan AI",
+  "description": "A professional, AI-powered flight planning and charter management system for aviation operations.",
+  "requestFramePermissions": ["geolocation"]
+}

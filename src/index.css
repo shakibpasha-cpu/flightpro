@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .dark .map-tiles {
+    filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+  }
+  
+  .dark .dark-popup .leaflet-popup-content-wrapper,
+  .dark .dark-popup .leaflet-popup-tip {
+    background-color: #1f2937; /* gray-800 */
+    color: #f9fafb; /* gray-50 */
+  }
+}

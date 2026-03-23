@@ -1,0 +1,179 @@
+{
+  "entities": {
+    "Airport": {
+      "title": "Airport",
+      "description": "Global airport data including operational details.",
+      "type": "object",
+      "properties": {
+        "icao": { "type": "string", "description": "4-letter ICAO code" },
+        "iata": { "type": "string", "description": "3-letter IATA code" },
+        "name": { "type": "string" },
+        "country": { "type": "string" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "runwayLength": { "type": "number", "description": "Length in feet" },
+        "elevation": { "type": "number", "description": "Elevation in feet" },
+        "fuelAvailability": { "type": "array", "items": { "type": "string" } },
+        "fuelRate": { "type": "number", "description": "USD per Liter" },
+        "landingFee": { "type": "number", "description": "USD" },
+        "parkingFee": { "type": "number", "description": "USD per day" },
+        "handlingFee": { "type": "number", "description": "USD" },
+        "handlingStatus": { "type": "string", "description": "Current handling availability status (e.g., Available, PPR, Limited)" },
+        "handlingAvailable": { "type": "boolean" },
+        "terminalNavigationFee": { "type": "number", "description": "USD" },
+        "cateringFee": { "type": "number", "description": "Estimated USD per passenger" },
+        "groundTransportFee": { "type": "number", "description": "Estimated USD per trip" },
+        "deicingFee": { "type": "number", "description": "Estimated USD per application" },
+        "parkingSpots": { "type": "integer" }
+      },
+      "required": ["icao", "iata", "lat", "lng"]
+    },
+    "Aircraft": {
+      "title": "Aircraft",
+      "description": "Aircraft performance and costing data.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string" },
+        "fuelBurnPerHour": { "type": "number", "description": "Liters or kg per hour" },
+        "cruiseSpeed": { "type": "number", "description": "Knots" },
+        "range": { "type": "number", "description": "Nautical miles" },
+        "maxPayload": { "type": "number", "description": "kg" },
+        "maxPassengers": { "type": "number", "description": "Number of seats" },
+        "takeoffDistance": { "type": "number", "description": "Feet" },
+        "landingDistance": { "type": "number", "description": "Feet" },
+        "hourlyRate": { "type": "number", "description": "USD" },
+        "landingFee": { "type": "number", "description": "USD" },
+        "handlingFee": { "type": "number", "description": "USD" },
+        "parkingFee": { "type": "number", "description": "USD" },
+        "maintenanceReserve": { "type": "number", "description": "USD per hour" },
+        "crewCostPerHour": { "type": "number", "description": "USD per hour" },
+        "homeBase": { "type": "string", "description": "ICAO code of home base airport" },
+        "currentLocation": { "type": "string", "description": "ICAO code of current location" },
+        "category": { "type": "string", "enum": ["Light Jet", "Midsize Jet", "Heavy Jet", "Cargo", "Turboprop"] }
+      },
+      "required": ["type", "fuelBurnPerHour", "cruiseSpeed", "range"]
+    },
+    "FIR": {
+      "title": "FIR",
+      "description": "Flight Information Region data for overflight charges.",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "country": { "type": "string" },
+        "overflightCharge": { "type": "number", "description": "USD per crossing or distance" },
+        "navigationCharge": { "type": "number", "description": "USD per crossing or distance" },
+        "rules": { "type": "string" }
+      },
+      "required": ["code", "country", "overflightCharge"]
+    },
+    "Quote": {
+      "title": "Quote",
+      "description": "A complete flight charter quote with multiple legs.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "status": { "type": "string", "enum": ["draft", "pending", "confirmed", "cancelled"] },
+        "legs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "departure": { "type": "string" },
+              "destination": { "type": "string" },
+              "distance": { "type": "number" },
+              "flightTime": { "type": "number" },
+              "fuelBurn": { "type": "number" },
+              "aircraftType": { "type": "string" },
+              "costs": { "type": "object" }
+            }
+          }
+        },
+        "totalCost": { "type": "number" },
+        "fuelPlan": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "legs", "totalCost"]
+    },
+    "HandlingAgent": {
+      "title": "HandlingAgent",
+      "description": "Ground handling providers per airport.",
+      "type": "object",
+      "properties": {
+        "icao": { "type": "string", "description": "Airport ICAO code" },
+        "companyName": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "website": { "type": "string" },
+        "baseFee": { "type": "number", "description": "Standard handling fee in USD" },
+        "additionalServices": { "type": "string", "description": "Details on extra costs" }
+      },
+      "required": ["icao", "companyName", "email"]
+    },
+    "Crew": {
+      "title": "Crew",
+      "description": "Crew member profile and operational status.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["Captain", "First Officer", "Cabin Crew"] },
+        "base": { "type": "string", "description": "Home base ICAO code" },
+        "status": { "type": "string", "enum": ["Available", "On Duty", "Resting"] }
+      },
+      "required": ["name", "role", "base", "status"]
+    },
+    "Schedule": {
+      "title": "Schedule",
+      "description": "Aircraft operational schedules and crew duty tracking.",
+      "type": "object",
+      "properties": {
+        "aircraftId": { "type": "string" },
+        "aircraftType": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "flights": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "departure": { "type": "string" },
+              "destination": { "type": "string" },
+              "etd": { "type": "string", "format": "time" },
+              "eta": { "type": "string", "format": "time" },
+              "flightTimeMinutes": { "type": "number" },
+              "flightDurationHours": { "type": "number", "description": "Hours" },
+              "turnaroundTime": { "type": "number", "description": "Minutes" }
+            }
+          }
+        },
+        "totalDutyTime": { "type": "number", "description": "Hours" },
+        "status": { "type": "string", "enum": ["draft", "published", "completed"] }
+      },
+      "required": ["aircraftId", "date", "flights"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global application settings and configuration.",
+      "type": "object",
+      "properties": {
+        "pricing": {
+          "type": "object",
+          "properties": {
+            "baseMarkup": { "type": "number", "description": "Percentage markup" },
+            "fuelSurcharge": { "type": "number", "description": "USD per leg" },
+            "handlingMarkup": { "type": "number", "description": "Percentage markup" }
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "/airports/{airportId}": { "schema": { "$ref": "Airport" }, "description": "Global airport database" },
+    "/aircraft/{aircraftId}": { "schema": { "$ref": "Aircraft" }, "description": "Aircraft fleet database" },
+    "/firs/{firId}": { "schema": { "$ref": "FIR" }, "description": "Airspace and FIR database" },
+    "/quotes/{quoteId}": { "schema": { "$ref": "Quote" }, "description": "Customer charter quotes" },
+    "/handlingAgents/{agentId}": { "schema": { "$ref": "HandlingAgent" }, "description": "Ground handling database" },
+    "/crew/{crewId}": { "schema": { "$ref": "Crew" }, "description": "Crew member database" },
+    "/schedules/{scheduleId}": { "schema": { "$ref": "Schedule" }, "description": "Aircraft and crew schedules" },
+    "/settings/{settingId}": { "schema": { "$ref": "Settings" }, "description": "Global settings" }
+  }
+}
