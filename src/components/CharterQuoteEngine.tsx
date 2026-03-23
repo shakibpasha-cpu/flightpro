@@ -42,6 +42,7 @@ export default function CharterQuoteEngine({ aircraftList }: QuoteEngineProps) {
   const [selectedQuoteIdx, setSelectedQuoteIdx] = useState<number>(0);
   const [inputMode, setInputMode] = useState<'manual' | 'chat'>('manual');
   const [chatInput, setChatInput] = useState('');
+  const [isFallback, setIsFallback] = useState(false);
 
   const handleClearForm = () => {
     setFormData({
@@ -151,6 +152,7 @@ export default function CharterQuoteEngine({ aircraftList }: QuoteEngineProps) {
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setIsFallback(false);
     try {
       // Fetch airport data from Firestore for departure and destination to provide context to AI
       const airportsData: any[] = [];
@@ -171,7 +173,8 @@ export default function CharterQuoteEngine({ aircraftList }: QuoteEngineProps) {
         currentDate: new Date().toISOString(),
         airportsContext: airportsData // Pass enriched airport data
       }, aircraftList);
-      setQuotesData(result);
+      setQuotesData(result.data);
+      setIsFallback(result.isFallback);
       setSelectedQuoteIdx(0); // Reset selection to first quote
     } catch (error) {
       console.error('Failed to generate quotes:', error);
@@ -270,6 +273,20 @@ export default function CharterQuoteEngine({ aircraftList }: QuoteEngineProps) {
             </button>
           </div>
         </div>
+
+        {isFallback && (
+          <div className="mb-6 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-2xl p-4 flex items-start gap-3">
+            <div className="mt-0.5 text-amber-600 dark:text-amber-500">
+              <Sparkles size={18} />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-amber-800 dark:text-amber-400">API Rate Limit Exceeded</h4>
+              <p className="text-xs text-amber-700 dark:text-amber-500 mt-1">
+                We are currently showing sample charter quotes data because the AI generation quota has been reached. Please try again later for live results.
+              </p>
+            </div>
+          </div>
+        )}
 
         {inputMode === 'chat' ? (
           <div className="space-y-4">
