@@ -1,179 +1,410 @@
 {
   "entities": {
-    "Airport": {
-      "title": "Airport",
-      "description": "Global airport data including operational details.",
+    "AircraftMaster": {
+      "title": "AircraftMaster",
+      "description": "Static aircraft performance and technical data.",
       "type": "object",
       "properties": {
-        "icao": { "type": "string", "description": "4-letter ICAO code" },
-        "iata": { "type": "string", "description": "3-letter IATA code" },
-        "name": { "type": "string" },
+        "aircraft_type": { "type": "string", "description": "e.g., A320" },
+        "category": { "type": "string", "description": "e.g., Narrowbody" },
+        "manufacturer": { "type": "string", "description": "e.g., Airbus" },
+        "max_range_km": { "type": "integer" },
+        "max_payload_kg": { "type": "integer" },
+        "passenger_capacity": { "type": "integer", "description": "Number of seats" },
+        "seats": { "type": "integer", "description": "Number of seats" },
+        "vip_config": { "type": "boolean", "description": "VIP configuration available" },
+        "cargo_volume_cbm": { "type": "integer", "description": "Cargo volume in cubic meters" },
+        "cargo_type": { "type": "string", "description": "General / Pharma / Live animals" },
+        "cruise_speed_kts": { "type": "integer" },
+        "fuel_burn_kg_per_hr": { "type": "integer" },
+        "mtow_kg": { "type": "integer" },
+        "runway_required_m": { "type": "integer" }
+      },
+      "required": ["aircraft_type", "max_range_km", "max_payload_kg"]
+    },
+    "Operator": {
+      "title": "Operator",
+      "description": "Airline or aircraft operator providing ACMI services.",
+      "type": "object",
+      "properties": {
+        "operator_name": { "type": "string" },
         "country": { "type": "string" },
-        "lat": { "type": "number" },
-        "lng": { "type": "number" },
-        "runwayLength": { "type": "number", "description": "Length in feet" },
-        "elevation": { "type": "number", "description": "Elevation in feet" },
-        "fuelAvailability": { "type": "array", "items": { "type": "string" } },
-        "fuelRate": { "type": "number", "description": "USD per Liter" },
-        "landingFee": { "type": "number", "description": "USD" },
-        "parkingFee": { "type": "number", "description": "USD per day" },
-        "handlingFee": { "type": "number", "description": "USD" },
-        "handlingStatus": { "type": "string", "description": "Current handling availability status (e.g., Available, PPR, Limited)" },
-        "handlingAvailable": { "type": "boolean" },
-        "terminalNavigationFee": { "type": "number", "description": "USD" },
-        "cateringFee": { "type": "number", "description": "Estimated USD per passenger" },
-        "groundTransportFee": { "type": "number", "description": "Estimated USD per trip" },
-        "deicingFee": { "type": "number", "description": "Estimated USD per application" },
-        "parkingSpots": { "type": "integer" }
+        "base_airport": { "type": "string", "description": "ICAO code" },
+        "contact_email": { "type": "string" },
+        "acmi_available": { "type": "boolean" },
+        "rating": { "type": "number" },
+        "icao_code": { "type": "string" },
+        "iata_code": { "type": "string" },
+        "callsign": { "type": "string" },
+        "aoc_number": { "type": "string" },
+        "operation_type": { "type": "string", "enum": ["Scheduled", "Charter", "Cargo", "Helicopter"] },
+        "status": { "type": "string", "enum": ["Active", "Suspended", "Pending"] },
+        "website": { "type": "string" },
+        "phone": { "type": "string" },
+        "founded_year": { "type": "integer" },
+        "fleet_size": { "type": "integer" },
+        "lastContacted": { "type": "string", "format": "date-time" },
+        "manual_notes": { "type": "string" }
       },
-      "required": ["icao", "iata", "lat", "lng"]
+      "required": ["operator_name", "contact_email"]
     },
-    "Aircraft": {
-      "title": "Aircraft",
-      "description": "Aircraft performance and costing data.",
+    "OperatorMaster": {
+      "title": "OperatorMaster",
+      "description": "Comprehensive operator database with intelligence engine fields.",
       "type": "object",
       "properties": {
-        "type": { "type": "string" },
-        "fuelBurnPerHour": { "type": "number", "description": "Liters or kg per hour" },
-        "cruiseSpeed": { "type": "number", "description": "Knots" },
-        "range": { "type": "number", "description": "Nautical miles" },
-        "maxPayload": { "type": "number", "description": "kg" },
-        "maxPassengers": { "type": "number", "description": "Number of seats" },
-        "takeoffDistance": { "type": "number", "description": "Feet" },
-        "landingDistance": { "type": "number", "description": "Feet" },
-        "hourlyRate": { "type": "number", "description": "USD" },
-        "landingFee": { "type": "number", "description": "USD" },
-        "handlingFee": { "type": "number", "description": "USD" },
-        "parkingFee": { "type": "number", "description": "USD" },
-        "maintenanceReserve": { "type": "number", "description": "USD per hour" },
-        "crewCostPerHour": { "type": "number", "description": "USD per hour" },
-        "homeBase": { "type": "string", "description": "ICAO code of home base airport" },
-        "currentLocation": { "type": "string", "description": "ICAO code of current location" },
-        "category": { "type": "string", "enum": ["Light Jet", "Midsize Jet", "Heavy Jet", "Cargo", "Turboprop"] }
-      },
-      "required": ["type", "fuelBurnPerHour", "cruiseSpeed", "range"]
-    },
-    "FIR": {
-      "title": "FIR",
-      "description": "Flight Information Region data for overflight charges.",
-      "type": "object",
-      "properties": {
-        "code": { "type": "string" },
-        "name": { "type": "string" },
+        "operator_name": { "type": "string" },
         "country": { "type": "string" },
-        "overflightCharge": { "type": "number", "description": "USD per crossing or distance" },
-        "navigationCharge": { "type": "number", "description": "USD per crossing or distance" },
-        "rules": { "type": "string" }
+        "region": { "type": "string" },
+        "iata_code": { "type": "string" },
+        "icao_code": { "type": "string" },
+        "callsign": { "type": "string" },
+        "aoc_number": { "type": "string" },
+        "license_type": { "type": "string", "enum": ["AOC", "RPT", "BOTH"] },
+        "operation_type": { "type": "string", "enum": ["Scheduled", "Charter", "Cargo", "Helicopter"] },
+        "status": { "type": "string", "enum": ["Active", "Suspended", "Pending"] },
+        "founded_year": { "type": "integer" },
+        "website": { "type": "string" },
+        "contact_email": { "type": "string" },
+        "source": { "type": "string" },
+        "last_updated": { "type": "string", "format": "date-time" },
+        "fleet_size": { "type": "integer" },
+        "priority_score": { "type": "number" },
+        "lastContacted": { "type": "string", "format": "date-time" },
+        "relationship_status": { "type": "string", "enum": ["Strong", "Warm", "Cold", "No Contact"] },
+        "manual_notes": { "type": "string" }
       },
-      "required": ["code", "country", "overflightCharge"]
+      "required": ["operator_name", "country"]
     },
-    "Quote": {
-      "title": "Quote",
-      "description": "A complete flight charter quote with multiple legs.",
+    "AircraftFleet": {
+      "title": "AircraftFleet",
+      "description": "Aircraft fleet data for an operator.",
       "type": "object",
       "properties": {
-        "userId": { "type": "string" },
-        "status": { "type": "string", "enum": ["draft", "pending", "confirmed", "cancelled"] },
+        "operator_id": { "type": "string", "description": "Reference to OperatorMaster" },
+        "aircraft_type": { "type": "string" },
+        "aircraft_family": { "type": "string", "enum": ["Narrowbody", "Widebody", "Freighter", "Regional", "Private Jet"] },
+        "manufacturer": { "type": "string" },
+        "quantity": { "type": "integer" },
+        "avg_age": { "type": "number" }
+      },
+      "required": ["operator_id", "aircraft_type", "quantity"]
+    },
+    "AOCLicense": {
+      "title": "AOCLicense",
+      "description": "License data for an operator.",
+      "type": "object",
+      "properties": {
+        "operator_id": { "type": "string", "description": "Reference to OperatorMaster" },
+        "license_type": { "type": "string", "enum": ["AOC", "RPT"] },
+        "issuing_authority": { "type": "string" },
+        "issue_date": { "type": "string", "format": "date" },
+        "expiry_date": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["Active", "Expired", "Suspended"] }
+      },
+      "required": ["operator_id", "license_type", "status"]
+    },
+    "AviationAuthority": {
+      "title": "AviationAuthority",
+      "description": "Global aviation authorities and scraping status.",
+      "type": "object",
+      "properties": {
+        "country": { "type": "string" },
+        "authority_name": { "type": "string" },
+        "website": { "type": "string" },
+        "scraping_type": { "type": "string", "enum": ["PDF", "HTML", "API", "Navigation"] },
+        "last_scraped": { "type": "string", "format": "date-time" }
+      },
+      "required": ["country", "authority_name"]
+    },
+    "AircraftListing": {
+      "title": "AircraftListing",
+      "description": "Connects aircraft with operators and defines specific rates.",
+      "type": "object",
+      "properties": {
+        "aircraft_id": { "type": "string", "description": "FK to AircraftMaster" },
+        "operator_id": { "type": "string", "description": "FK to Operator" },
+        "tail_number": { "type": "string" },
+        "year_of_manufacture": { "type": "integer" },
+        "configuration": { "type": "string" },
+        "acmi_rate_per_hr": { "type": "number" },
+        "monthly_guaranteed_hours": { "type": "number", "description": "MGH for long-term leases" },
+        "monthly_fixed_fee": { "type": "number", "description": "Fixed monthly cost for lease" },
+        "min_lease_term_months": { "type": "integer", "default": 1 },
+        "lease_deposit_months": { "type": "integer", "default": 1 },
+        "currency": { "type": "string", "default": "USD" },
+        "crew_included": { "type": "boolean" },
+        "maintenance_included": { "type": "boolean" },
+        "insurance_included": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["Active", "Inactive", "Maintenance"] }
+      },
+      "required": ["aircraft_id", "operator_id", "acmi_rate_per_hr"]
+    },
+    "Availability": {
+      "title": "Availability",
+      "description": "Aircraft availability blocks and status tracking.",
+      "type": "object",
+      "properties": {
+        "aircraft_listing_id": { "type": "string", "description": "FK to AircraftListing" },
+        "start_date": { "type": "string", "format": "date" },
+        "end_date": { "type": "string", "format": "date" },
+        "availability_status": { "type": "string", "enum": ["Available", "Booked", "Maintenance", "Unknown"] },
+        "location_airport": { "type": "string", "description": "ICAO code" }
+      },
+      "required": ["aircraft_listing_id", "start_date", "end_date", "availability_status"]
+    },
+    "PricingAdjustment": {
+      "title": "PricingAdjustment",
+      "description": "Dynamic pricing adjustments based on season, demand, and urgency.",
+      "type": "object",
+      "properties": {
+        "aircraft_listing_id": { "type": "string", "description": "FK to AircraftListing (optional for global rules)" },
+        "season": { "type": "string", "enum": ["Low", "High", "Peak"] },
+        "demand_multiplier": { "type": "number" },
+        "urgency_multiplier": { "type": "number" },
+        "region": { "type": "string" }
+      }
+    },
+    "FuelPrice": {
+      "title": "FuelPrice",
+      "description": "Fuel pricing per airport.",
+      "type": "object",
+      "properties": {
+        "airport": { "type": "string", "description": "ICAO code" },
+        "fuel_price_per_kg": { "type": "number" },
+        "last_updated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["airport", "fuel_price_per_kg"]
+    },
+    "FIRCharge": {
+      "title": "FIRCharge",
+      "description": "Overflight charges per country or FIR.",
+      "type": "object",
+      "properties": {
+        "country": { "type": "string" },
+        "charge_per_km": { "type": "number" },
+        "weight_factor": { "type": "number" }
+      },
+      "required": ["country", "charge_per_km"]
+    },
+    "AirportCharge": {
+      "title": "AirportCharge",
+      "description": "Landing, handling, and parking fees per airport.",
+      "type": "object",
+      "properties": {
+        "airport": { "type": "string", "description": "ICAO code" },
+        "landing_fee": { "type": "number" },
+        "handling_fee": { "type": "number" },
+        "parking_fee_per_hr": { "type": "number" }
+      },
+      "required": ["airport"]
+    },
+    "CrewCost": {
+      "title": "CrewCost",
+      "description": "Estimated crew costs per aircraft type.",
+      "type": "object",
+      "properties": {
+        "aircraft_type": { "type": "string" },
+        "crew_per_day_cost": { "type": "number" },
+        "hotel_cost": { "type": "number" },
+        "transport_cost": { "type": "number" }
+      },
+      "required": ["aircraft_type"]
+    },
+    "InsuranceRule": {
+      "title": "InsuranceRule",
+      "description": "Insurance surcharges and rules per region.",
+      "type": "object",
+      "properties": {
+        "region": { "type": "string" },
+        "base_included": { "type": "boolean" },
+        "war_risk_multiplier": { "type": "number" }
+      },
+      "required": ["region"]
+    },
+    "AIPrediction": {
+      "title": "AIPrediction",
+      "description": "AI-generated predictions for availability and rates.",
+      "type": "object",
+      "properties": {
+        "aircraft_listing_id": { "type": "string" },
+        "predicted_availability": { "type": "string" },
+        "confidence_score": { "type": "number" },
+        "predicted_rate": { "type": "number" }
+      },
+      "required": ["aircraft_listing_id"]
+    },
+    "EmptyLeg": {
+      "title": "EmptyLeg",
+      "description": "Available empty leg opportunities.",
+      "type": "object",
+      "properties": {
+        "route": { "type": "string" },
+        "aircraft_listing_id": { "type": "string" },
+        "discount_percentage": { "type": "number" },
+        "date": { "type": "string", "format": "date" }
+      }
+    },
+    "QuoteHistory": {
+      "title": "QuoteHistory",
+      "description": "History of generated quotes.",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string" },
+        "quote_data": { "type": "object" },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "HandlingAgent": {
+      "title": "HandlingAgent",
+      "description": "Ground handling agents and their services.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "airport": { "type": "string" },
+        "services": { "type": "array", "items": { "type": "string" } },
+        "contact": { "type": "string" },
+        "rating": { "type": "number" },
+        "aircraftRates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "aircraftType": { "type": "string" },
+              "fee": { "type": "number" }
+            },
+            "required": ["aircraftType", "fee"]
+          }
+        }
+      },
+      "required": ["name", "airport"]
+    },
+    "AircraftRate": {
+      "title": "AircraftRate",
+      "description": "Market ACMI rates for different aircraft types.",
+      "type": "object",
+      "properties": {
+        "aircraft_type": { "type": "string" },
+        "category": { "type": "string" },
+        "min_rate": { "type": "number" },
+        "max_rate": { "type": "number" },
+        "avg_rate": { "type": "number" },
+        "fuel_burn": { "type": "number" },
+        "cruise_speed": { "type": "number", "description": "Cruise speed in knots" },
+        "payload": { "type": "number" },
+        "payload_kg": { "type": "number" },
+        "cargo_volume_cbm": { "type": "number" },
+        "cargo_type": { "type": "string" },
+        "seats": { "type": "number" },
+        "vip_config": { "type": "boolean" }
+      },
+      "required": ["aircraft_type", "min_rate", "max_rate"]
+    },
+    "CrewMember": {
+      "title": "CrewMember",
+      "description": "Flight and cabin crew members.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["Captain", "First Officer", "Flight Engineer", "Cabin Crew", "Loadmaster"] },
+        "status": { "type": "string", "enum": ["Active", "On Leave", "Training", "Sick"] },
+        "totalHours": { "type": "number" },
+        "lastDutyEnd": { "type": "string", "format": "date-time" },
+        "contactEmail": { "type": "string" },
+        "contactPhone": { "type": "string" }
+      },
+      "required": ["name", "role", "status"]
+    },
+    "DutyLog": {
+      "title": "DutyLog",
+      "description": "Duty time logs for crew members.",
+      "type": "object",
+      "properties": {
+        "crewMemberId": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["Flight", "Standby", "Training", "Positioning"] },
+        "notes": { "type": "string" }
+      },
+      "required": ["crewMemberId", "startTime", "endTime", "type"]
+    },
+    "FlightPlan": {
+      "title": "FlightPlan",
+      "description": "Multi-leg flight plans created by users.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "totalCost": { "type": "number" },
+        "totalDistance": { "type": "number" },
+        "totalFlightTime": { "type": "number" },
         "legs": {
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
-              "departure": { "type": "string" },
-              "destination": { "type": "string" },
-              "distance": { "type": "number" },
-              "flightTime": { "type": "number" },
-              "fuelBurn": { "type": "number" },
+              "id": { "type": "string" },
+              "from": { "type": "string" },
+              "to": { "type": "string" },
+              "date": { "type": "string" },
               "aircraftType": { "type": "string" },
-              "costs": { "type": "object" }
-            }
-          }
-        },
-        "totalCost": { "type": "number" },
-        "fuelPlan": { "type": "object" },
-        "createdAt": { "type": "string", "format": "date-time" }
-      },
-      "required": ["userId", "legs", "totalCost"]
-    },
-    "HandlingAgent": {
-      "title": "HandlingAgent",
-      "description": "Ground handling providers per airport.",
-      "type": "object",
-      "properties": {
-        "icao": { "type": "string", "description": "Airport ICAO code" },
-        "companyName": { "type": "string" },
-        "email": { "type": "string" },
-        "phone": { "type": "string" },
-        "website": { "type": "string" },
-        "baseFee": { "type": "number", "description": "Standard handling fee in USD" },
-        "additionalServices": { "type": "string", "description": "Details on extra costs" }
-      },
-      "required": ["icao", "companyName", "email"]
-    },
-    "Crew": {
-      "title": "Crew",
-      "description": "Crew member profile and operational status.",
-      "type": "object",
-      "properties": {
-        "name": { "type": "string" },
-        "role": { "type": "string", "enum": ["Captain", "First Officer", "Cabin Crew"] },
-        "base": { "type": "string", "description": "Home base ICAO code" },
-        "status": { "type": "string", "enum": ["Available", "On Duty", "Resting"] }
-      },
-      "required": ["name", "role", "base", "status"]
-    },
-    "Schedule": {
-      "title": "Schedule",
-      "description": "Aircraft operational schedules and crew duty tracking.",
-      "type": "object",
-      "properties": {
-        "aircraftId": { "type": "string" },
-        "aircraftType": { "type": "string" },
-        "date": { "type": "string", "format": "date" },
-        "flights": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "departure": { "type": "string" },
-              "destination": { "type": "string" },
-              "etd": { "type": "string", "format": "time" },
-              "eta": { "type": "string", "format": "time" },
-              "flightTimeMinutes": { "type": "number" },
-              "flightDurationHours": { "type": "number", "description": "Hours" },
-              "turnaroundTime": { "type": "number", "description": "Minutes" }
-            }
-          }
-        },
-        "totalDutyTime": { "type": "number", "description": "Hours" },
-        "status": { "type": "string", "enum": ["draft", "published", "completed"] }
-      },
-      "required": ["aircraftId", "date", "flights"]
-    },
-    "Settings": {
-      "title": "Settings",
-      "description": "Global application settings and configuration.",
-      "type": "object",
-      "properties": {
-        "pricing": {
-          "type": "object",
-          "properties": {
-            "baseMarkup": { "type": "number", "description": "Percentage markup" },
-            "fuelSurcharge": { "type": "number", "description": "USD per leg" },
-            "handlingMarkup": { "type": "number", "description": "Percentage markup" }
+              "passengers": { "type": "integer" },
+              "cargoWeight": { "type": "number" },
+              "metrics": {
+                "type": "object",
+                "properties": {
+                  "distance": { "type": "number" },
+                  "flightTime": { "type": "number" },
+                  "estimatedCost": { "type": "number" }
+                }
+              }
+            },
+            "required": ["id", "from", "to", "date", "aircraftType"]
           }
         }
-      }
+      },
+      "required": ["name", "createdAt", "legs"]
+    },
+    "FlightLog": {
+      "title": "FlightLog",
+      "description": "Historical flight log for a specific aircraft listing.",
+      "type": "object",
+      "properties": {
+        "aircraft_listing_id": { "type": "string", "description": "FK to AircraftListing" },
+        "departure": { "type": "string", "description": "ICAO code" },
+        "destination": { "type": "string", "description": "ICAO code" },
+        "date": { "type": "string", "format": "date" },
+        "duration_hours": { "type": "number" },
+        "notes": { "type": "string" }
+      },
+      "required": ["aircraft_listing_id", "departure", "destination", "date", "duration_hours"]
     }
   },
   "firestore": {
-    "/airports/{airportId}": { "schema": { "$ref": "Airport" }, "description": "Global airport database" },
-    "/aircraft/{aircraftId}": { "schema": { "$ref": "Aircraft" }, "description": "Aircraft fleet database" },
-    "/firs/{firId}": { "schema": { "$ref": "FIR" }, "description": "Airspace and FIR database" },
-    "/quotes/{quoteId}": { "schema": { "$ref": "Quote" }, "description": "Customer charter quotes" },
-    "/handlingAgents/{agentId}": { "schema": { "$ref": "HandlingAgent" }, "description": "Ground handling database" },
-    "/crew/{crewId}": { "schema": { "$ref": "Crew" }, "description": "Crew member database" },
-    "/schedules/{scheduleId}": { "schema": { "$ref": "Schedule" }, "description": "Aircraft and crew schedules" },
-    "/settings/{settingId}": { "schema": { "$ref": "Settings" }, "description": "Global settings" }
+    "/aircraft_master/{id}": { "schema": { "$ref": "AircraftMaster" }, "description": "Static aircraft technical data" },
+    "/operators/{id}": { "schema": { "$ref": "Operator" }, "description": "Operator database" },
+    "/operators_master/{id}": { "schema": { "$ref": "OperatorMaster" }, "description": "Comprehensive global operator database" },
+    "/aircraft_fleet/{id}": { "schema": { "$ref": "AircraftFleet" }, "description": "Operator fleet data" },
+    "/aoc_licenses/{id}": { "schema": { "$ref": "AOCLicense" }, "description": "Operator license data" },
+    "/aviation_authorities/{id}": { "schema": { "$ref": "AviationAuthority" }, "description": "Global aviation authorities" },
+    "/aircraft_listings/{id}": { "schema": { "$ref": "AircraftListing" }, "description": "Aircraft listings per operator" },
+    "/availability/{id}": { "schema": { "$ref": "Availability" }, "description": "Aircraft availability tracking" },
+    "/pricing_adjustments/{id}": { "schema": { "$ref": "PricingAdjustment" }, "description": "Dynamic pricing rules" },
+    "/fuel_prices/{airport}": { "schema": { "$ref": "FuelPrice" }, "description": "Fuel pricing database" },
+    "/fir_charges/{id}": { "schema": { "$ref": "FIRCharge" }, "description": "Overflight charges database" },
+    "/airport_charges/{airport}": { "schema": { "$ref": "AirportCharge" }, "description": "Airport fees database" },
+    "/crew_costs/{id}": { "schema": { "$ref": "CrewCost" }, "description": "Crew cost estimates" },
+    "/insurance_rules/{id}": { "schema": { "$ref": "InsuranceRule" }, "description": "Insurance surcharges" },
+    "/ai_predictions/{id}": { "schema": { "$ref": "AIPrediction" }, "description": "AI predictions" },
+    "/empty_legs/{id}": { "schema": { "$ref": "EmptyLeg" }, "description": "Empty leg opportunities" },
+    "/quote_history/{id}": { "schema": { "$ref": "QuoteHistory" }, "description": "Historical quotes" },
+    "/aircraft_rates/{id}": { "schema": { "$ref": "AircraftRate" }, "description": "Market ACMI rates" },
+    "/handling_agents/{id}": { "schema": { "$ref": "HandlingAgent" }, "description": "Ground handling agents" },
+    "/crew_members/{id}": { "schema": { "$ref": "CrewMember" }, "description": "Crew member database" },
+    "/duty_logs/{id}": { "schema": { "$ref": "DutyLog" }, "description": "Duty time logs" },
+    "/flight_plans/{id}": { "schema": { "$ref": "FlightPlan" }, "description": "Multi-leg flight plans" },
+    "/flight_logs/{id}": { "schema": { "$ref": "FlightLog" }, "description": "Historical flight logs for aircraft" }
   }
 }
+

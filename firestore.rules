@@ -18,6 +18,68 @@ service cloud.firestore {
       );
     }
 
+function isValidOperatorMaster(data) {
+      return data.operator_name is string && data.operator_name.size() > 0 && data.operator_name.size() < 100 &&
+             data.country is string && data.country.size() > 0 &&
+             (!('region' in data) || data.region is string) &&
+             (!('status' in data) || data.status in ['Active', 'Suspended', 'Pending']) &&
+             (!('license_type' in data) || data.license_type in ['AOC', 'RPT', 'BOTH']) &&
+             (!('aoc_number' in data) || data.aoc_number is string) &&
+             (!('lastContacted' in data) || data.lastContacted is string) &&
+             (!('operation_type' in data) || data.operation_type in ['Scheduled', 'Charter', 'Cargo', 'Helicopter']);
+    }
+
+    function isValidOperator(data) {
+      return data.operator_name is string && data.operator_name.size() > 0 &&
+             data.contact_email is string &&
+             (!('status' in data) || data.status in ['Active', 'Suspended', 'Pending']) &&
+             (!('aoc_number' in data) || data.aoc_number is string) &&
+             (!('lastContacted' in data) || data.lastContacted is string) &&
+             (!('operation_type' in data) || data.operation_type in ['Scheduled', 'Charter', 'Cargo', 'Helicopter']);
+    }
+
+    function isValidAircraftFleet(data) {
+      return data.operator_id is string &&
+             data.aircraft_type is string &&
+             data.quantity is int &&
+             (!('aircraft_family' in data) || data.aircraft_family in ['Narrowbody', 'Widebody', 'Freighter', 'Regional', 'Private Jet']);
+    }
+
+    function isValidAOCLicense(data) {
+      return data.operator_id is string &&
+             data.license_type in ['AOC', 'RPT'] &&
+             data.status in ['Active', 'Expired', 'Suspended'];
+    }
+
+    function isValidAviationAuthority(data) {
+      return data.country is string &&
+             data.authority_name is string &&
+             (!('scraping_type' in data) || data.scraping_type in ['PDF', 'HTML', 'API', 'Navigation']) &&
+             (!('last_scraped' in data) || data.last_scraped is string) &&
+             (!('aoc_data' in data) || data.aoc_data is list);
+    }
+
+    function isValidCrewMember(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.role in ["Captain", "First Officer", "Flight Engineer", "Cabin Crew", "Loadmaster"] &&
+             data.status in ["Active", "On Leave", "Training", "Sick"];
+    }
+
+    function isValidDutyLog(data) {
+      return data.crewMemberId is string &&
+             data.startTime is string &&
+             data.endTime is string &&
+             data.type in ["Flight", "Standby", "Training", "Positioning"];
+    }
+
+    function isValidFlightLog(data) {
+      return data.aircraft_listing_id is string &&
+             data.departure is string &&
+             data.destination is string &&
+             data.date is string &&
+             data.duration_hours is number;
+    }
+
     // Global Databases - Publicly readable, admin only write
     match /airports/{airportId} {
       allow read: if true;
@@ -44,13 +106,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Schedules - Publicly readable for authenticated users, admin only write
     match /schedules/{scheduleId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
     }
 
-    // Quotes - User can create and read their own
     match /quotes/{quoteId} {
       allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
@@ -58,16 +118,166 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // User profiles
     match /users/{userId} {
       allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       allow write: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
     }
 
-    // Settings - Authenticated users can read, admin only write
     match /settings/{settingId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin();
+    }
+
+    match /pricingRules/{ruleId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /routes/{routeId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // ACMI Database - Publicly readable, admin only write
+    match /aircraft_master/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /operators/{id} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidOperator(request.resource.data);
+      allow update: if isAdmin() && isValidOperator(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /operators_master/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidOperatorMaster(request.resource.data);
+      allow update: if isAdmin() && isValidOperatorMaster(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /aircraft_fleet/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidAircraftFleet(request.resource.data);
+      allow update: if isAdmin() && isValidAircraftFleet(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /aoc_licenses/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidAOCLicense(request.resource.data);
+      allow update: if isAdmin() && isValidAOCLicense(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /aviation_authorities/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidAviationAuthority(request.resource.data);
+      allow update: if isAdmin() && isValidAviationAuthority(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /aircraft_listings/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /availability/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /pricing_adjustments/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /fuel_prices/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /fir_charges/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /airport_charges/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /crew_costs/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /insurance_rules/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /ai_predictions/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /empty_legs/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /quote_history/{id} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /aircraft_rates/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /handling_agents/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /crew_members/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidCrewMember(request.resource.data);
+      allow update: if isAdmin() && isValidCrewMember(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /duty_logs/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidDutyLog(request.resource.data);
+      allow update: if isAuthenticated() && isValidDutyLog(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /automation_tasks/{taskId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /flight_plans/{planId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /flight_logs/{logId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidFlightLog(request.resource.data);
+      allow update: if isAdmin() && isValidFlightLog(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }

@@ -170,7 +170,7 @@ export default function HandlingAgentDatabase() {
       } else {
         await addDoc(collection(db, 'handlingAgents'), formData);
       }
-      setFormData({ icao: '', companyName: '', email: '', phone: '', website: '', baseFee: 0, additionalServices: '' });
+      setFormData({ icao: '', companyName: '', email: '', phone: '', website: '', baseFee: 0, additionalServices: '', aircraftRates: [] });
       fetchAgents();
     } catch (error) {
       handleFirestoreError(error, editingId ? OperationType.UPDATE : OperationType.CREATE, 'handlingAgents');
@@ -181,7 +181,7 @@ export default function HandlingAgentDatabase() {
 
   const handleEdit = (agent: HandlingAgent) => {
     setEditingId(agent.id || null);
-    setFormData({ ...agent });
+    setFormData({ ...agent, aircraftRates: agent.aircraftRates || [] });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -215,9 +215,29 @@ export default function HandlingAgentDatabase() {
       phone: agent.phone || '',
       website: agent.website || '',
       baseFee: agent.baseFee,
-      additionalServices: agent.additionalServices
+      additionalServices: agent.additionalServices,
+      aircraftRates: agent.aircraftRates || []
     });
     setSuggestedAgents([]);
+  };
+
+  const handleAddAircraftRate = () => {
+    setFormData({
+      ...formData,
+      aircraftRates: [...(formData.aircraftRates || []), { aircraftType: '', fee: 0 }]
+    });
+  };
+
+  const handleRemoveAircraftRate = (index: number) => {
+    const newRates = [...(formData.aircraftRates || [])];
+    newRates.splice(index, 1);
+    setFormData({ ...formData, aircraftRates: newRates });
+  };
+
+  const handleUpdateAircraftRate = (index: number, field: 'aircraftType' | 'fee', value: string | number) => {
+    const newRates = [...(formData.aircraftRates || [])];
+    newRates[index] = { ...newRates[index], [field]: value };
+    setFormData({ ...formData, aircraftRates: newRates });
   };
 
   const handleDelete = async (id: string) => {
@@ -365,13 +385,55 @@ export default function HandlingAgentDatabase() {
                 />
               </div>
 
+              <div className="space-y-3 pt-2 border-t border-gray-100 dark:border-gray-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Aircraft Specific Rates</label>
+                  <button
+                    type="button"
+                    onClick={handleAddAircraftRate}
+                    className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-bold flex items-center gap-1"
+                  >
+                    <Plus size={14} /> Add Rate
+                  </button>
+                </div>
+                
+                {formData.aircraftRates?.map((rate, idx) => (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      placeholder="e.g. A320"
+                      value={rate.aircraftType}
+                      onChange={(e) => handleUpdateAircraftRate(idx, 'aircraftType', e.target.value)}
+                      className="flex-1 p-2 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-lg text-sm dark:text-white"
+                    />
+                    <div className="relative flex-1">
+                      <DollarSign className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                      <input
+                        type="number"
+                        placeholder="Fee"
+                        value={rate.fee || ''}
+                        onChange={(e) => handleUpdateAircraftRate(idx, 'fee', parseFloat(e.target.value) || 0)}
+                        className="w-full pl-8 p-2 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-lg text-sm dark:text-white"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAircraftRate(idx)}
+                      className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
               <div className="flex gap-3 pt-2">
                 {editingId && (
                   <button 
                     type="button"
                     onClick={() => {
                       setEditingId(null);
-                      setFormData({ icao: '', companyName: '', email: '', phone: '', website: '', baseFee: 0, additionalServices: '' });
+                      setFormData({ icao: '', companyName: '', email: '', phone: '', website: '', baseFee: 0, additionalServices: '', aircraftRates: [] });
                     }}
                     className="flex-1 py-3 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 font-bold rounded-2xl hover:bg-gray-50 dark:hover:bg-gray-800 transition text-sm"
                   >
@@ -504,14 +566,14 @@ export default function HandlingAgentDatabase() {
                     {agent.phone && (
                       <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                         <Phone size={14} className="text-gray-400 dark:text-gray-500" />
-                        <span>{agent.phone}</span>
+                        <a href={`tel:${agent.phone}`} className="hover:text-indigo-600 dark:hover:text-indigo-400 transition">{agent.phone}</a>
                       </div>
                     )}
                     {agent.website && (
                       <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                        <Globe size={14} className="text-gray-400 dark:text-gray-500" />
-                        <a href={agent.website} target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition flex items-center gap-1">
-                          Website <ExternalLink size={10} />
+                        <Globe size={14} className="text-gray-400 dark:text-gray-500 shrink-0" />
+                        <a href={agent.website} target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition flex items-center gap-1 truncate">
+                          {agent.website.replace(/^https?:\/\//, '')} <ExternalLink size={10} className="shrink-0" />
                         </a>
                       </div>
                     )}
@@ -523,6 +585,20 @@ export default function HandlingAgentDatabase() {
                       <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2 italic leading-relaxed">
                         "{agent.additionalServices}"
                       </p>
+                    </div>
+                  )}
+
+                  {agent.aircraftRates && agent.aircraftRates.length > 0 && (
+                    <div className="pt-4 border-t border-gray-50 dark:border-gray-700">
+                      <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2">Aircraft Rates</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {agent.aircraftRates.map((rate, idx) => (
+                          <div key={idx} className="flex justify-between items-center bg-gray-50 dark:bg-gray-900/50 p-2 rounded-lg border border-gray-100 dark:border-gray-800">
+                            <span className="text-xs font-bold text-gray-700 dark:text-gray-300">{rate.aircraftType}</span>
+                            <span className="text-xs font-black text-indigo-600 dark:text-indigo-400">${rate.fee.toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </motion.div>

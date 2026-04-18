@@ -8,7 +8,10 @@ import {
   ArrowDownRight,
   PlaneTakeoff,
   Clock,
-  CheckCircle2
+  CheckCircle2,
+  AlertTriangle,
+  ShieldAlert,
+  Zap
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -105,6 +108,59 @@ export default function DashboardOverview() {
           icon={<Users size={20} className="text-blue-600 dark:text-blue-400" />} 
           color="bg-blue-50 dark:bg-blue-900/30"
         />
+      </div>
+
+      {/* Reality Check / Platform Edge */}
+      <div className="bg-gradient-to-r from-gray-900 to-indigo-950 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3"></div>
+        <div className="relative z-10 flex flex-col lg:flex-row gap-8 items-center justify-between">
+          <div className="lg:w-1/2 space-y-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-500/20 text-red-200 rounded-full text-xs font-bold border border-red-500/30">
+              <AlertTriangle size={14} /> The Reality Check
+            </div>
+            <h3 className="text-2xl font-black">The Aviation Data Problem</h3>
+            <ul className="space-y-3 mt-4">
+              <li className="flex items-start gap-3">
+                <span className="text-red-400 mt-1">❌</span>
+                <p className="text-gray-300 text-sm"><strong className="text-white">No public real ACMI pricing database.</strong> Rates are hidden behind NDAs and manual negotiations.</p>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="text-red-400 mt-1">❌</span>
+                <p className="text-gray-300 text-sm"><strong className="text-white">Operators don't share availability easily.</strong> Schedules change hourly and are rarely synced globally.</p>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="text-red-400 mt-1">❌</span>
+                <p className="text-gray-300 text-sm"><strong className="text-white">Data is fragmented.</strong> Brokers waste hours checking multiple systems, emails, and WhatsApp groups.</p>
+              </li>
+            </ul>
+          </div>
+          
+          <div className="lg:w-1/2 bg-white/10 backdrop-blur-md border border-white/20 p-6 rounded-2xl w-full">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-300">
+                <Zap size={24} />
+              </div>
+              <h4 className="text-lg font-bold text-white">Our Platform Edge</h4>
+            </div>
+            <p className="text-indigo-100 text-sm leading-relaxed mb-6">
+              That's why our <strong className="text-white">AI + Scraping + Network</strong> combo is so powerful. We aggregate, analyze, and predict what others can't see.
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-black/20 p-3 rounded-xl text-center">
+                <div className="text-indigo-400 font-black text-xl mb-1">AI</div>
+                <div className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Routing & Costing</div>
+              </div>
+              <div className="bg-black/20 p-3 rounded-xl text-center">
+                <div className="text-indigo-400 font-black text-xl mb-1">Scraping</div>
+                <div className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Market Data</div>
+              </div>
+              <div className="bg-black/20 p-3 rounded-xl text-center">
+                <div className="text-indigo-400 font-black text-xl mb-1">Network</div>
+                <div className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Live Availability</div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

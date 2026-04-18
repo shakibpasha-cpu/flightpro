@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LineChart,
   Line,
@@ -7,23 +7,26 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend
+  Legend,
+  BarChart,
+  Bar,
+  Cell
 } from 'recharts';
 
 interface Aircraft {
   id?: string;
   type: string;
-  fuelBurnPerHour: number;
-  cruiseSpeed: number;
-  range: number;
-  maxPayload: number;
-  maxPassengers: number;
-  takeoffDistance: number;
-  landingDistance: number;
-  hourlyRate: number;
+  fuelBurnPerHour: number | '';
+  cruiseSpeed: number | '';
+  range: number | '';
+  maxPayload: number | '';
+  maxPassengers: number | '';
+  takeoffDistance: number | '';
+  landingDistance: number | '';
+  hourlyRate: number | '';
   category: string;
-  maintenanceReserve: number;
-  crewCostPerHour: number;
+  maintenanceReserve: number | '';
+  crewCostPerHour: number | '';
 }
 
 interface Props {
@@ -31,6 +34,21 @@ interface Props {
 }
 
 export default function AircraftComparisonCharts({ aircrafts }: Props) {
+  const [selectedMetric, setSelectedMetric] = useState<'range' | 'cruiseSpeed' | 'fuelBurnPerHour' | 'maxPayload' | 'hourlyRate'>('range');
+
+  const metrics = [
+    { id: 'range', label: 'Range (nm)' },
+    { id: 'cruiseSpeed', label: 'Cruise Speed (kts)' },
+    { id: 'fuelBurnPerHour', label: 'Fuel Burn (L/h)' },
+    { id: 'maxPayload', label: 'Max Payload (kg)' },
+    { id: 'hourlyRate', label: 'Hourly Rate ($)' }
+  ];
+
+  const barData = aircrafts.map(a => ({
+    name: a.type,
+    value: Number(a[selectedMetric]) || 0
+  }));
+
   // Generate Range vs Payload data for all aircraft
   const generateRangePayloadData = () => {
     const data = [];
@@ -39,9 +57,9 @@ export default function AircraftComparisonCharts({ aircrafts }: Props) {
       const payloadPercent = i / steps;
       const entry: any = { payloadPercent };
       aircrafts.forEach(a => {
-        const payload = Math.round(a.maxPayload * payloadPercent);
+        const payload = Math.round((Number(a.maxPayload) || 0) * payloadPercent);
         const rangeFactor = 1 - (payloadPercent * 0.3);
-        const range = Math.round(a.range * rangeFactor);
+        const range = Math.round((Number(a.range) || 0) * rangeFactor);
         entry[a.type] = range;
       });
       data.push(entry);
@@ -87,6 +105,66 @@ export default function AircraftComparisonCharts({ aircrafts }: Props) {
 
   return (
     <div className="space-y-8 py-4">
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+          <h4 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-widest">Key Metrics Comparison</h4>
+          <div className="flex flex-wrap gap-2">
+            {metrics.map(m => (
+              <button
+                key={m.id}
+                onClick={() => setSelectedMetric(m.id as any)}
+                className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  selectedMetric === m.id 
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none' 
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                }`}
+              >
+                {m.label.split(' (')[0]}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="h-[300px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={barData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" className="dark:stroke-gray-700" />
+              <XAxis 
+                dataKey="name" 
+                tick={{ fontSize: 10, fill: '#9ca3af', fontWeight: 600 }} 
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis 
+                tick={{ fontSize: 10, fill: '#9ca3af', fontWeight: 600 }} 
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip 
+                cursor={{ fill: 'transparent' }}
+                content={({ active, payload }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="bg-white dark:bg-gray-800 p-3 rounded-xl shadow-xl border border-gray-100 dark:border-gray-700 text-xs font-bold">
+                        <p className="text-gray-900 dark:text-white mb-1">{payload[0].payload.name}</p>
+                        <p className="text-indigo-600 dark:text-indigo-400">
+                          {metrics.find(m => m.id === selectedMetric)?.label}: {payload[0].value.toLocaleString()}
+                        </p>
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+              />
+              <Bar dataKey="value" radius={[10, 10, 0, 0]} barSize={40}>
+                {barData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
       <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
         <h4 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-widest mb-6">Range vs Payload Comparison</h4>
         <div className="h-[300px] w-full">

@@ -1,0 +1,105 @@
+import L from 'leaflet';
+
+export const CHART_LAYERS = {
+  standard: {
+    id: 'standard',
+    name: 'Standard Map',
+    url: (isDark: boolean) => isDark 
+      ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+      : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    maxZoom: 18,
+    subdomains: 'abcd',
+    tms: false
+  },
+  vfr: {
+    id: 'vfr',
+    name: 'VFR Sectional (US)',
+    url: "https://tiles.arcgis.com/tiles/ssSGoCbaAsSRiZat/arcgis/rest/services/VFR_Sectional/MapServer/tile/{z}/{y}/{x}",
+    attribution: 'FAA Sectional Charts',
+    maxZoom: 12,
+    tms: false,
+    subdomains: []
+  },
+  ifrLow: {
+    id: 'ifrLow',
+    name: 'IFR Low Enroute (US)',
+    url: "https://tiles.arcgis.com/tiles/ssSGoCbaAsSRiZat/arcgis/rest/services/IFR_Low_Enroute/MapServer/tile/{z}/{y}/{x}",
+    attribution: 'FAA IFR Low Enroute',
+    maxZoom: 12,
+    tms: false,
+    subdomains: []
+  },
+  ifrHigh: {
+    id: 'ifrHigh',
+    name: 'IFR High Enroute (US)',
+    url: "https://tiles.arcgis.com/tiles/ssSGoCbaAsSRiZat/arcgis/rest/services/IFR_High_Enroute/MapServer/tile/{z}/{y}/{x}",
+    attribution: 'FAA IFR High Enroute',
+    maxZoom: 12,
+    tms: false,
+    subdomains: []
+  },
+  worldVfr: {
+    id: 'worldVfr',
+    name: 'World VFR Chart',
+    url: "https://{s}.tile.openflightmaps.org/live/vfr/latest/pad/{z}/{x}/{y}.png",
+    attribution: '&copy; OpenFlightMaps contributors',
+    subdomains: 'abc',
+    maxZoom: 12,
+    tms: false
+  },
+  skyVectorVfr: {
+    id: 'skyVectorVfr',
+    name: 'SkyVector VFR',
+    url: "https://skyvector.com/tiles/301/{z}/{x}/{y}.jpg",
+    attribution: '&copy; SkyVector',
+    maxZoom: 11,
+    tms: false,
+    subdomains: []
+  },
+  skyVectorIfrLow: {
+    id: 'skyVectorIfrLow',
+    name: 'SkyVector IFR Low',
+    url: "https://skyvector.com/tiles/304/{z}/{x}/{y}.jpg",
+    attribution: '&copy; SkyVector',
+    maxZoom: 11,
+    tms: false,
+    subdomains: []
+  }
+};
+
+export const DefaultIcon = L.icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+});
+
+// Helper for bearing calculation
+export function getBearing(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  const θ = Math.atan2(y, x);
+  return (θ * 180 / Math.PI + 360) % 360;
+}
+
+// Helper for midpoint calculation
+export function getMidpoint(lat1: number, lon1: number, lat2: number, lon2: number) {
+  return [(lat1 + lat2) / 2, (lon1 + lon2) / 2] as [number, number];
+}
+
+// Helper for distance calculation (Great Circle in nm)
+export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 3440.065; // Radius of the earth in nm
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2); 
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  return R * c; // Distance in nm
+}

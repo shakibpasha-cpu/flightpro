@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Plane, Plus, Trash2, AlertCircle, CheckCircle2, Save, Loader2, ChevronRight, ChevronLeft, Copy, History, Edit2, Zap, Sparkles, Building2, Mail, Phone, DollarSign, X } from 'lucide-react';
+import { Calendar, Clock, Plane, Plus, Trash2, AlertCircle, CheckCircle2, Save, Loader2, ChevronRight, ChevronLeft, Copy, History, Edit2, Zap, Sparkles, Building2, Mail, Phone, DollarSign, X, Globe } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, query, where, orderBy, Timestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
 import { motion, AnimatePresence } from 'motion/react';
-import { optimizeFlightSchedule, getAirportCoords, searchHandlingAgents } from '../services/aiService';
+import { optimizeFlightSchedule, getAirportCoords, searchHandlingAgents, getAirportDetails } from '../services/aiService';
 
 interface Flight {
   departure: string;
@@ -17,12 +17,27 @@ interface Flight {
   altitude: number; // feet
   departureCoords?: { lat: number; lng: number };
   destinationCoords?: { lat: number; lng: number };
+  departureDetails?: {
+    runwayLength?: number;
+    elevation?: number;
+    fuelTypes?: string[];
+    handlingAvailable?: boolean;
+  };
+  destinationDetails?: {
+    runwayLength?: number;
+    elevation?: number;
+    fuelTypes?: string[];
+    handlingAvailable?: boolean;
+  };
   handlingAgent?: {
     companyName: string;
     email: string;
     phone?: string;
     baseFee: number;
   };
+  crewIds?: string[];
+  passengers?: number;
+  cargoWeight?: number;
   error?: string;
 }
 
@@ -79,6 +94,55 @@ export default function ScheduleBuilder() {
   const DUTY_LIMIT_HOURS = 14;
   const MIN_TURNAROUND_MINUTES = 45;
 
+  const calculateCrewDutyTime = (crewId: string, currentFlights: Flight[]) => {
+    const assignedFlights = currentFlights.filter(f => f.crewIds?.includes(crewId));
+    if (assignedFlights.length === 0) return 0;
+    
+    // Sort assigned flights by ETD to find first and last
+    const sorted = [...assignedFlights].sort((a, b) => {
+      if (!a.etd || !b.etd) return 0;
+      return a.etd.localeCompare(b.etd);
+    });
+    
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    
+    if (!first.etd || !last.eta) return 0;
+
+    const [sH, sM] = first.etd.split(':').map(Number);
+    const [eH, eM] = last.eta.split(':').map(Number);
+    
+    let startMinutes = sH * 60 + sM - 60; // 1h before first flight
+    let endMinutes = eH * 60 + eM + 30; // 30m after last flight
+    
+    if (endMinutes < startMinutes) endMinutes += 24 * 60; // Handle overnight
+    
+    return (endMinutes - startMinutes) / 60;
+  };
+
+  const formatMinutes = (minutes: number) => {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (h === 0) return `${m}m`;
+    if (m === 0) return `${h}h`;
+    return `${h}h ${m}m`;
+  };
+
+  const ensureTurnaroundTimes = (flights: Flight[]): Flight[] => {
+    return flights.map((flight, idx) => {
+      if (idx === 0) return { ...flight, turnaroundTime: 0 };
+      const prevFlight = flights[idx - 1];
+      if (prevFlight.eta && flight.etd) {
+        const [pHE, pME] = prevFlight.eta.split(':').map(Number);
+        const [cHS, cMS] = flight.etd.split(':').map(Number);
+        let diff = (cHS * 60 + cMS) - (pHE * 60 + pME);
+        if (diff < 0) diff += 24 * 60;
+        return { ...flight, turnaroundTime: diff };
+      }
+      return flight;
+    });
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -96,13 +160,16 @@ export default function ScheduleBuilder() {
 
         const schedulesData = schedulesSnap.docs.map(doc => {
           const data = doc.data() as Schedule;
+          const flightsWithTurnaround = ensureTurnaroundTimes(data.flights.map(f => ({
+            ...f,
+            altitude: f.altitude || 35000,
+            crewIds: f.crewIds || []
+          })));
+          
           return {
             ...data,
             id: doc.id,
-            flights: data.flights.map(f => ({
-              ...f,
-              altitude: f.altitude || 35000
-            }))
+            flights: flightsWithTurnaround
           } as Schedule;
         });
         setAllSchedules(Array.from(new Map(schedulesData.map(item => [item.id, item])).values()));
@@ -123,23 +190,39 @@ export default function ScheduleBuilder() {
 
   const addFlight = () => {
     const lastFlight = flights[flights.length - 1];
+    let defaultEtd = '08:00';
+    
+    if (lastFlight?.eta) {
+      const [h, m] = lastFlight.eta.split(':').map(Number);
+      const totalMinutes = h * 60 + m + MIN_TURNAROUND_MINUTES;
+      const newH = Math.floor(totalMinutes / 60) % 24;
+      const newM = totalMinutes % 60;
+      defaultEtd = `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
+    }
+
     const newFlight: Flight = {
       departure: lastFlight?.destination || '',
       destination: '',
-      etd: lastFlight?.eta || '08:00',
+      etd: defaultEtd,
       eta: '',
       flightTimeMinutes: 0,
       flightDurationHours: 0,
       turnaroundTime: MIN_TURNAROUND_MINUTES,
       altitude: 35000,
       departureCoords: lastFlight?.destinationCoords,
-      handlingAgent: undefined
+      handlingAgent: undefined,
+      crewIds: [],
+      passengers: 0,
+      cargoWeight: 0
     };
     setFlights([...flights, newFlight]);
   };
 
   const removeFlight = (index: number) => {
-    setFlights(flights.filter((_, i) => i !== index));
+    const newFlights = flights.filter((_, i) => i !== index);
+    setFlights(newFlights);
+    const allCrewIds = Array.from(new Set(newFlights.flatMap(f => f.crewIds || [])));
+    setSelectedCrew(allCrewIds);
   };
 
   const updateFlight = (index: number, updates: Partial<Flight>) => {
@@ -199,32 +282,51 @@ export default function ScheduleBuilder() {
 
     newFlights[index] = currentFlight;
 
-    // Fetch coordinates if departure/destination changes
+    // Fetch details if departure/destination changes
     if (updates.departure !== undefined) {
-      if (updates.departure.length === 4 && updates.departure !== flights[index].departure) {
-        getAirportCoords(updates.departure).then(coords => {
+      if ((updates.departure.length === 4 || updates.departure.length === 3) && updates.departure !== flights[index].departure) {
+        getAirportDetails(updates.departure).then(details => {
           setFlights(prev => {
             const updated = [...prev];
             if (updated[index]) {
-              updated[index] = { ...updated[index], departureCoords: { lat: coords.lat, lng: coords.lng } };
+              updated[index] = { 
+                ...updated[index], 
+                departureCoords: { lat: details.lat, lng: details.lng },
+                departureDetails: {
+                  runwayLength: details.runwayLength,
+                  elevation: details.elevation,
+                  fuelTypes: details.fuelTypes,
+                  handlingAvailable: details.handlingAvailable
+                }
+              };
             }
             return updated;
           });
         }).catch(console.error);
-      } else if (updates.departure.length < 4) {
+      } else if (updates.departure.length < 3) {
         currentFlight.departureCoords = undefined;
+        currentFlight.departureDetails = undefined;
       }
     }
     if (updates.destination !== undefined) {
-      if (updates.destination.length === 4 && updates.destination !== flights[index].destination) {
+      if ((updates.destination.length === 4 || updates.destination.length === 3) && updates.destination !== flights[index].destination) {
         // Clear handling agent if destination changes
         currentFlight.handlingAgent = undefined;
 
-        getAirportCoords(updates.destination).then(coords => {
+        getAirportDetails(updates.destination).then(details => {
           setFlights(prev => {
             const updated = [...prev];
             if (updated[index]) {
-              updated[index] = { ...updated[index], destinationCoords: { lat: coords.lat, lng: coords.lng } };
+              updated[index] = { 
+                ...updated[index], 
+                destinationCoords: { lat: details.lat, lng: details.lng },
+                destinationDetails: {
+                  runwayLength: details.runwayLength,
+                  elevation: details.elevation,
+                  fuelTypes: details.fuelTypes,
+                  handlingAvailable: details.handlingAvailable
+                }
+              };
             }
             return updated;
           });
@@ -275,6 +377,35 @@ export default function ScheduleBuilder() {
       newFlights[index] = currentFlight;
       setFlights(newFlights);
     }
+  };
+
+  const toggleCrewForLeg = (legIdx: number, crewId: string) => {
+    const newFlights = [...flights];
+    const leg = { ...newFlights[legIdx] };
+    const currentCrew = leg.crewIds || [];
+    
+    if (currentCrew.includes(crewId)) {
+      leg.crewIds = currentCrew.filter(id => id !== crewId);
+    } else {
+      // Check duty time limit before adding
+      const tempFlights = [...flights];
+      tempFlights[legIdx] = { ...leg, crewIds: [...currentCrew, crewId] };
+      const dutyTime = calculateCrewDutyTime(crewId, tempFlights);
+      
+      if (dutyTime > DUTY_LIMIT_HOURS) {
+        alert(`Cannot assign crew member. Total duty time would exceed ${DUTY_LIMIT_HOURS} hours.`);
+        return;
+      }
+      
+      leg.crewIds = [...currentCrew, crewId];
+    }
+    
+    newFlights[legIdx] = leg;
+    setFlights(newFlights);
+    
+    // Also update global selectedCrew to be the union of all leg crew
+    const allCrewIds = Array.from(new Set(newFlights.flatMap(f => f.crewIds || [])));
+    setSelectedCrew(allCrewIds);
   };
 
   const handleOpenAgentSelector = async (index: number, icao: string) => {
@@ -351,22 +482,42 @@ export default function ScheduleBuilder() {
 
   const calculateTotalDuty = () => {
     if (flights.length === 0) return 0;
-    const firstEtd = flights[0].etd;
-    const lastEta = flights[flights.length - 1].eta;
-    if (!firstEtd || !lastEta) return 0;
-
-    const [fHS, fMS] = firstEtd.split(':').map(Number);
-    const [lHE, lME] = lastEta.split(':').map(Number);
     
-    let diffMinutes = (lHE * 60 + lME) - (fHS * 60 + fMS);
-    if (diffMinutes < 0) diffMinutes += 24 * 60; // Handle overnight
+    const sorted = [...flights].sort((a, b) => {
+      if (!a.etd || !b.etd) return 0;
+      return a.etd.localeCompare(b.etd);
+    });
+    
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    
+    if (!first.etd || !last.eta) {
+      // Fallback if ETD/ETA are missing
+      const totalFlightMinutes = flights.reduce((sum, f) => sum + (f.flightTimeMinutes || 0), 0);
+      const totalTurnaroundMinutes = flights.slice(1).reduce((sum, f) => sum + (f.turnaroundTime || 0), 0);
+      const totalMinutes = totalFlightMinutes + totalTurnaroundMinutes + 90;
+      return totalMinutes / 60;
+    }
 
-    // Add 1 hour for pre-flight and 30 mins for post-flight
-    return (diffMinutes + 90) / 60;
+    const [sH, sM] = first.etd.split(':').map(Number);
+    const [eH, eM] = last.eta.split(':').map(Number);
+    
+    let startMinutes = sH * 60 + sM - 60; // 1h before first flight
+    let endMinutes = eH * 60 + eM + 30; // 30m after last flight
+    
+    if (endMinutes < startMinutes) endMinutes += 24 * 60; // Handle overnight
+    
+    return (endMinutes - startMinutes) / 60;
   };
 
   const totalDuty = calculateTotalDuty();
-  const isOverLimit = totalDuty > DUTY_LIMIT_HOURS;
+  
+  // Check if any assigned crew member exceeds the limit
+  const maxCrewDuty = selectedCrew.length > 0 
+    ? Math.max(...selectedCrew.map(id => calculateCrewDutyTime(id, flights)))
+    : totalDuty;
+    
+  const isOverLimit = maxCrewDuty > DUTY_LIMIT_HOURS;
   const hasErrors = flights.some(f => f.error);
 
   const handleSave = async () => {
@@ -379,12 +530,19 @@ export default function ScheduleBuilder() {
       return;
     }
 
-    // Check for crew availability
+    // Check for crew availability and duty limits
     for (const crewId of selectedCrew) {
       const crewBusy = allSchedules.find(s => s.date === selectedDate && s.crewIds.includes(crewId) && s.id !== editingId);
       if (crewBusy) {
         const crewMember = crewList.find(c => c.id === crewId);
         alert(`${crewMember?.name} is already assigned to another flight on ${selectedDate}.`);
+        return;
+      }
+
+      const dutyTime = calculateCrewDutyTime(crewId, flights);
+      if (dutyTime > DUTY_LIMIT_HOURS) {
+        const crewMember = crewList.find(c => c.id === crewId);
+        alert(`${crewMember?.name}'s total duty time (${dutyTime.toFixed(1)}h) exceeds the limit of ${DUTY_LIMIT_HOURS}h.`);
         return;
       }
     }
@@ -478,7 +636,7 @@ export default function ScheduleBuilder() {
   const handleEdit = (schedule: Schedule) => {
     setEditingId(schedule.id || null);
     setSelectedDate(schedule.date);
-    setFlights(schedule.flights);
+    setFlights(schedule.flights.map(f => ({ ...f, crewIds: f.crewIds || [] })));
     setSelectedCrew(schedule.crewIds || []);
     setViewMode('builder');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -501,17 +659,19 @@ export default function ScheduleBuilder() {
     const firstFlight = s.flights[0];
     const lastFlight = s.flights[s.flights.length - 1];
     
-    const start = new Date(`${s.date}T${firstFlight.etd}`);
-    const end = new Date(`${s.date}T${lastFlight.eta}`);
+    if (!firstFlight || !lastFlight) return null;
+
+    const start = new Date(`${s.date}T${firstFlight.etd || '00:00'}`);
+    const end = new Date(`${s.date}T${lastFlight.eta || '23:59'}`);
 
     return {
       id: s.id,
-      title: `${s.aircraftType}: ${firstFlight.departure} → ${lastFlight.destination}`,
+      title: `${s.aircraftType}: ${firstFlight.departure || '???'} → ${lastFlight.destination || '???'}`,
       start,
       end,
       resource: s
     };
-  });
+  }).filter((e): e is any => e !== null);
 
   return (
     <div className="space-y-8">
@@ -661,7 +821,7 @@ export default function ScheduleBuilder() {
                     <div className="mt-4 pt-3 border-t border-emerald-100 dark:border-emerald-900/30 flex justify-end">
                       <button 
                         onClick={() => {
-                          setFlights(optimizationResult.revisedSchedule);
+                          setFlights(ensureTurnaroundTimes(optimizationResult.revisedSchedule));
                           setOptimizationResult(null);
                         }}
                         className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors"
@@ -676,9 +836,20 @@ export default function ScheduleBuilder() {
 
               <div className="space-y-4">
                 {flights.map((flight, idx) => (
-                  <motion.div 
-                    key={idx}
-                    initial={{ opacity: 0, x: -10 }}
+                  <React.Fragment key={idx}>
+                    {idx > 0 && (
+                      <div className="flex items-center justify-center -my-2 relative z-10">
+                        <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 px-4 py-1.5 rounded-full shadow-sm flex items-center gap-2 group/turnaround">
+                          <Clock size={12} className={flight.turnaroundTime < MIN_TURNAROUND_MINUTES ? 'text-amber-500' : 'text-indigo-500'} />
+                          <span className={`text-[10px] font-black uppercase tracking-widest ${flight.turnaroundTime < MIN_TURNAROUND_MINUTES ? 'text-amber-600 dark:text-amber-500' : 'text-gray-500 dark:text-gray-400'}`}>
+                            Turnaround: {formatMinutes(flight.turnaroundTime || 0)}
+                            {flight.turnaroundTime < MIN_TURNAROUND_MINUTES && ' (Below Minimum)'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    <motion.div 
+                      initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
                     className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-100 dark:border-gray-700 relative group"
                   >
@@ -696,8 +867,32 @@ export default function ScheduleBuilder() {
                           {flight.departureCoords && (
                             <div className="flex items-center gap-1 group/coords relative">
                               <span className="text-[8px] text-emerald-500 font-bold cursor-help">LOCATED</span>
-                              <div className="absolute bottom-full right-0 mb-1 hidden group-hover/coords:block bg-gray-900 text-white text-[8px] px-2 py-1 rounded shadow-lg whitespace-nowrap z-10">
-                                {flight.departureCoords.lat.toFixed(4)}, {flight.departureCoords.lng.toFixed(4)}
+                              <div className="absolute bottom-full left-0 mb-2 hidden group-hover/coords:block bg-gray-900 dark:bg-gray-800 text-white p-3 rounded-xl shadow-2xl border border-gray-700 z-[60] min-w-[200px]">
+                                <p className="text-[10px] font-black text-indigo-400 uppercase mb-2 border-b border-gray-700 pb-1">Airport Details</p>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                  <div>
+                                    <p className="text-[8px] text-gray-500 uppercase font-bold">Coords</p>
+                                    <p className="text-[9px] font-mono">{flight.departureCoords.lat.toFixed(4)}, {flight.departureCoords.lng.toFixed(4)}</p>
+                                  </div>
+                                  {flight.departureDetails?.elevation !== undefined && (
+                                    <div>
+                                      <p className="text-[8px] text-gray-500 uppercase font-bold">Elevation</p>
+                                      <p className="text-[9px]">{flight.departureDetails.elevation} ft</p>
+                                    </div>
+                                  )}
+                                  {flight.departureDetails?.runwayLength !== undefined && (
+                                    <div>
+                                      <p className="text-[8px] text-gray-500 uppercase font-bold">Runway</p>
+                                      <p className="text-[9px]">{flight.departureDetails.runwayLength} ft</p>
+                                    </div>
+                                  )}
+                                  {flight.departureDetails?.fuelTypes && (
+                                    <div className="col-span-2">
+                                      <p className="text-[8px] text-gray-500 uppercase font-bold">Fuel</p>
+                                      <p className="text-[9px]">{flight.departureDetails.fuelTypes.join(', ')}</p>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           )}
@@ -716,8 +911,32 @@ export default function ScheduleBuilder() {
                           {flight.destinationCoords && (
                             <div className="flex items-center gap-1 group/coords relative">
                               <span className="text-[8px] text-emerald-500 font-bold cursor-help">LOCATED</span>
-                              <div className="absolute bottom-full right-0 mb-1 hidden group-hover/coords:block bg-gray-900 text-white text-[8px] px-2 py-1 rounded shadow-lg whitespace-nowrap z-10">
-                                {flight.destinationCoords.lat.toFixed(4)}, {flight.destinationCoords.lng.toFixed(4)}
+                              <div className="absolute bottom-full left-0 mb-2 hidden group-hover/coords:block bg-gray-900 dark:bg-gray-800 text-white p-3 rounded-xl shadow-2xl border border-gray-700 z-[60] min-w-[200px]">
+                                <p className="text-[10px] font-black text-indigo-400 uppercase mb-2 border-b border-gray-700 pb-1">Airport Details</p>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                  <div>
+                                    <p className="text-[8px] text-gray-500 uppercase font-bold">Coords</p>
+                                    <p className="text-[9px] font-mono">{flight.destinationCoords.lat.toFixed(4)}, {flight.destinationCoords.lng.toFixed(4)}</p>
+                                  </div>
+                                  {flight.destinationDetails?.elevation !== undefined && (
+                                    <div>
+                                      <p className="text-[8px] text-gray-500 uppercase font-bold">Elevation</p>
+                                      <p className="text-[9px]">{flight.destinationDetails.elevation} ft</p>
+                                    </div>
+                                  )}
+                                  {flight.destinationDetails?.runwayLength !== undefined && (
+                                    <div>
+                                      <p className="text-[8px] text-gray-500 uppercase font-bold">Runway</p>
+                                      <p className="text-[9px]">{flight.destinationDetails.runwayLength} ft</p>
+                                    </div>
+                                  )}
+                                  {flight.destinationDetails?.fuelTypes && (
+                                    <div className="col-span-2">
+                                      <p className="text-[8px] text-gray-500 uppercase font-bold">Fuel</p>
+                                      <p className="text-[9px]">{flight.destinationDetails.fuelTypes.join(', ')}</p>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           )}
@@ -775,6 +994,24 @@ export default function ScheduleBuilder() {
                           className="w-full p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm dark:text-white"
                           value={flight.altitude}
                           onChange={(e) => updateFlight(idx, { altitude: parseInt(e.target.value) || 0 })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Passengers</label>
+                        <input 
+                          type="number" 
+                          className="w-full p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm dark:text-white"
+                          value={flight.passengers || 0}
+                          onChange={(e) => updateFlight(idx, { passengers: parseInt(e.target.value) || 0 })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Cargo (kg)</label>
+                        <input 
+                          type="number" 
+                          className="w-full p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-sm dark:text-white"
+                          value={flight.cargoWeight || 0}
+                          onChange={(e) => updateFlight(idx, { cargoWeight: parseInt(e.target.value) || 0 })}
                         />
                       </div>
                     </div>
@@ -870,6 +1107,45 @@ export default function ScheduleBuilder() {
                       )}
                     </div>
 
+                    {/* Crew Assignment Section */}
+                    <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg">
+                            <Plus size={14} className="text-indigo-600 dark:text-indigo-400" />
+                          </div>
+                          <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Leg Crew</span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-2">
+                        {crewList.map(crew => {
+                          const isAssigned = flight.crewIds?.includes(crew.id);
+                          const dutyTime = calculateCrewDutyTime(crew.id, flights);
+                          const wouldExceed = !isAssigned && calculateCrewDutyTime(crew.id, flights.map((f, i) => i === idx ? { ...f, crewIds: [...(f.crewIds || []), crew.id] } : f)) > DUTY_LIMIT_HOURS;
+
+                          return (
+                            <button
+                              key={crew.id}
+                              onClick={() => toggleCrewForLeg(idx, crew.id)}
+                              disabled={wouldExceed}
+                              className={`px-3 py-1.5 rounded-xl border text-[10px] font-bold transition-all flex items-center gap-2 ${
+                                isAssigned
+                                  ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400'
+                                  : wouldExceed
+                                    ? 'border-gray-100 dark:border-gray-700 opacity-30 cursor-not-allowed'
+                                    : 'border-gray-100 dark:border-gray-700 hover:border-gray-200 dark:hover:border-gray-600 text-gray-500 dark:text-gray-400'
+                              }`}
+                              title={wouldExceed ? `Assignment would exceed ${DUTY_LIMIT_HOURS}h duty limit` : ''}
+                            >
+                              {crew.name.split(' ').pop()}
+                              {isAssigned && <span className="text-[8px] opacity-60">({dutyTime.toFixed(1)}h)</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
                     {flight.error && (
                       <div className="mt-3 flex items-center gap-2 text-red-500 dark:text-red-400">
                         <AlertCircle size={14} />
@@ -877,17 +1153,9 @@ export default function ScheduleBuilder() {
                       </div>
                     )}
 
-                    {idx > 0 && (
-                      <div className="mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700 flex items-center gap-2">
-                        <Clock size={12} className="text-gray-400 dark:text-gray-500" />
-                        <span className={`text-[10px] font-bold uppercase tracking-wider ${flight.turnaroundTime < MIN_TURNAROUND_MINUTES ? 'text-amber-600 dark:text-amber-500' : 'text-gray-400 dark:text-gray-500'}`}>
-                          Turnaround: {flight.turnaroundTime} mins
-                          {flight.turnaroundTime < MIN_TURNAROUND_MINUTES && ' (Below Minimum)'}
-                        </span>
-                      </div>
-                    )}
                   </motion.div>
-                ))}
+                </React.Fragment>
+              ))}
 
                 {flights.length === 0 && (
                   <div className="text-center py-12 border-2 border-dashed border-gray-100 dark:border-gray-700 rounded-3xl">
@@ -906,38 +1174,49 @@ export default function ScheduleBuilder() {
               {/* Crew Assignment */}
               {flights.length > 0 && (
                 <div className="mt-8 pt-6 border-t border-gray-100 dark:border-gray-700">
-                  <h4 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4">Crew Assignment</h4>
+                  <h4 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4">Crew Assignment Summary</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {crewList.map(crew => (
-                      <button
-                        key={crew.id}
-                        onClick={() => {
-                          if (selectedCrew.includes(crew.id)) {
-                            setSelectedCrew(selectedCrew.filter(id => id !== crew.id));
-                          } else {
-                            setSelectedCrew([...selectedCrew, crew.id]);
-                          }
-                        }}
-                        className={`p-3 rounded-xl border text-left transition-all ${
-                          selectedCrew.includes(crew.id)
-                            ? 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400'
-                            : 'border-gray-100 dark:border-gray-700 hover:border-gray-200 dark:hover:border-gray-600'
-                        }`}
-                      >
-                        <div className="flex justify-between items-start mb-1">
-                          <p className="text-sm font-bold">{crew.name}</p>
-                          <div className="flex items-center gap-1">
-                            <span className={`w-2 h-2 rounded-full ${
-                              crew.status === 'Available' ? 'bg-emerald-500' :
-                              crew.status === 'On Duty' ? 'bg-amber-500' :
-                              'bg-blue-500'
-                            }`} />
-                            <span className="text-[9px] font-bold uppercase tracking-tighter opacity-70">{crew.status}</span>
+                    {crewList.map(crew => {
+                      const isAssigned = selectedCrew.includes(crew.id);
+                      const dutyTime = calculateCrewDutyTime(crew.id, flights);
+                      const isOver = dutyTime > DUTY_LIMIT_HOURS;
+
+                      return (
+                        <div
+                          key={crew.id}
+                          className={`p-3 rounded-xl border text-left transition-all ${
+                            isAssigned
+                              ? isOver 
+                                ? 'border-red-600 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
+                                : 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400'
+                              : 'border-gray-100 dark:border-gray-700 opacity-50'
+                          }`}
+                        >
+                          <div className="flex justify-between items-start mb-1">
+                            <p className="text-sm font-bold">{crew.name}</p>
+                            <div className="flex items-center gap-1">
+                              <span className={`w-2 h-2 rounded-full ${
+                                crew.status === 'Available' ? 'bg-emerald-500' :
+                                crew.status === 'On Duty' ? 'bg-amber-500' :
+                                'bg-blue-500'
+                              }`} />
+                              <span className="text-[9px] font-bold uppercase tracking-tighter opacity-70">{crew.status}</span>
+                            </div>
+                          </div>
+                          <div className="flex justify-between items-end">
+                            <p className="text-[10px] opacity-60 font-bold uppercase">{crew.role}</p>
+                            {isAssigned && (
+                              <div className="text-right">
+                                <p className={`text-[10px] font-black ${isOver ? 'text-red-600' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                                  Duty: {dutyTime.toFixed(1)}h
+                                </p>
+                                {isOver && <p className="text-[8px] font-bold text-red-500 uppercase">Over Limit!</p>}
+                              </div>
+                            )}
                           </div>
                         </div>
-                        <p className="text-[10px] opacity-60 font-bold uppercase">{crew.role}</p>
-                      </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -946,10 +1225,12 @@ export default function ScheduleBuilder() {
                 <div className="mt-8 pt-6 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center">
                   <div className="flex gap-6">
                     <div className="space-y-1">
-                      <p className="text-[10px] text-gray-400 dark:text-gray-500 font-bold uppercase tracking-widest">Total Duty</p>
+                      <p className="text-[10px] text-gray-400 dark:text-gray-500 font-bold uppercase tracking-widest">
+                        {selectedCrew.length > 0 ? 'Max Crew Duty' : 'Total Duty'}
+                      </p>
                       <div className="flex items-center gap-2">
                         <p className={`text-lg font-black ${isOverLimit ? 'text-red-600 dark:text-red-500' : 'text-gray-900 dark:text-white'}`}>
-                          {totalDuty.toFixed(1)}h
+                          {selectedCrew.length > 0 ? maxCrewDuty.toFixed(1) : totalDuty.toFixed(1)}h
                         </p>
                         {isOverLimit && <AlertCircle size={16} className="text-red-500 dark:text-red-400" />}
                       </div>
@@ -1017,12 +1298,27 @@ export default function ScheduleBuilder() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-2 mb-3">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-3">
                       {s.flights.map((f, i) => (
                         <React.Fragment key={i}>
-                          <span className="text-[10px] font-bold text-gray-600 dark:text-gray-400">{f.departure}</span>
-                          <ChevronRight size={10} className="text-gray-300 dark:text-gray-600" />
-                          {i === s.flights.length - 1 && <span className="text-[10px] font-bold text-gray-600 dark:text-gray-400">{f.destination}</span>}
+                          <div className="flex flex-col">
+                            <span className="text-[10px] font-bold text-gray-800 dark:text-white">{f.departure}</span>
+                            <span className="text-[8px] text-gray-400 font-medium">{f.etd}</span>
+                          </div>
+                          
+                          <div className="flex flex-col items-center px-1">
+                            <ChevronRight size={10} className="text-gray-300 dark:text-gray-600" />
+                            {i < s.flights.length - 1 && s.flights[i+1].turnaroundTime && (
+                              <span className="text-[7px] font-black text-indigo-500/70">{formatMinutes(s.flights[i+1].turnaroundTime || 0)}</span>
+                            )}
+                          </div>
+
+                          {i === s.flights.length - 1 && (
+                            <div className="flex flex-col">
+                              <span className="text-[10px] font-bold text-gray-800 dark:text-white">{f.destination}</span>
+                              <span className="text-[8px] text-gray-400 font-medium">{f.eta}</span>
+                            </div>
+                          )}
                         </React.Fragment>
                       ))}
                     </div>
@@ -1030,9 +1326,10 @@ export default function ScheduleBuilder() {
                     <div className="flex flex-wrap gap-1 mb-3">
                       {s.crewIds?.map(cid => {
                         const crew = crewList.find(c => c.id === cid);
+                        if (!crew?.name) return null;
                         return (
                           <span key={cid} className="text-[9px] bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full font-bold">
-                            {crew?.name.split(' ').pop()}
+                            {crew.name.split(' ').pop()}
                           </span>
                         );
                       })}
@@ -1151,7 +1448,13 @@ export default function ScheduleBuilder() {
                             {agent.phone && (
                               <div className="flex items-center gap-1">
                                 <Phone size={12} />
-                                <span>{agent.phone}</span>
+                                <a href={`tel:${agent.phone}`} className="hover:text-indigo-600 dark:hover:text-indigo-400 transition" onClick={(e) => e.stopPropagation()}>{agent.phone}</a>
+                              </div>
+                            )}
+                            {agent.website && (
+                              <div className="flex items-center gap-1">
+                                <Globe size={12} />
+                                <a href={agent.website} target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 dark:hover:text-indigo-400 transition truncate max-w-[150px]" onClick={(e) => e.stopPropagation()}>{agent.website.replace(/^https?:\/\//, '')}</a>
                               </div>
                             )}
                           </div>

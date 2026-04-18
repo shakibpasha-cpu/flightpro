@@ -1,12 +1,14 @@
 import React from 'react';
 import { ShieldAlert, FileText, Clock, DollarSign, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface Permit {
   country: string;
   type: 'Overflight' | 'Landing';
   leadTime: string;
   estimatedFee: number;
+  requiredDocs?: string[];
+  validityPeriod?: string;
 }
 
 interface RestrictedArea {
@@ -21,6 +23,7 @@ interface PermitSystemProps {
 }
 
 export default function PermitSystem({ permits, restrictedAreas }: PermitSystemProps) {
+  const [expandedPermit, setExpandedPermit] = React.useState<number | null>(null);
   const severityColors = {
     Low: 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 border-blue-100 dark:border-blue-800/50',
     Medium: 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 border-amber-100 dark:border-amber-800/50',
@@ -58,7 +61,8 @@ export default function PermitSystem({ permits, restrictedAreas }: PermitSystemP
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: idx * 0.1 }}
                   key={idx}
-                  className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-4 rounded-2xl shadow-sm hover:border-indigo-200 dark:hover:border-indigo-500/50 transition-colors"
+                  className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-4 rounded-2xl shadow-sm hover:border-indigo-200 dark:hover:border-indigo-500/50 transition-colors cursor-pointer"
+                  onClick={() => setExpandedPermit(expandedPermit === idx ? null : idx)}
                 >
                   <div className="flex justify-between items-start mb-2">
                     <div>
@@ -66,22 +70,52 @@ export default function PermitSystem({ permits, restrictedAreas }: PermitSystemP
                       <p className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-widest">{permit.type} Permit</p>
                     </div>
                     <div className="text-right">
-                      <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold text-sm">
+                      <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-black text-sm">
                         <DollarSign size={14} />
-                        <span>{permit.estimatedFee}</span>
+                        <span>{permit.estimatedFee > 0 ? permit.estimatedFee.toLocaleString() : 'TBD'}</span>
                       </div>
+                      <p className="text-[8px] text-gray-400 uppercase font-bold tracking-tighter">Est. Fee</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-50 dark:border-gray-700">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 pt-3 border-t border-gray-50 dark:border-gray-700">
                     <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
-                      <Clock size={12} />
-                      <span className="text-[10px] font-bold uppercase tracking-widest">Lead Time: {permit.leadTime}</span>
+                      <Clock size={12} className="text-indigo-500" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest">Lead Time: <span className="text-gray-700 dark:text-gray-300">{permit.leadTime}</span></span>
                     </div>
-                    <div className="flex items-center gap-1.5 text-emerald-500 dark:text-emerald-400">
-                      <CheckCircle2 size={12} />
-                      <span className="text-[10px] font-bold uppercase tracking-widest">Standard Procedure</span>
-                    </div>
+                    {permit.validityPeriod && (
+                      <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                        <CheckCircle2 size={12} className="text-emerald-500" />
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Valid: <span className="text-gray-700 dark:text-gray-300">{permit.validityPeriod}</span></span>
+                      </div>
+                    )}
                   </div>
+
+                  <AnimatePresence>
+                    {expandedPermit === idx && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="mt-4 pt-4 border-t border-gray-50 dark:border-gray-700 space-y-3">
+                          {permit.requiredDocs && permit.requiredDocs.length > 0 && (
+                            <div>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Required Documentation</p>
+                              <ul className="space-y-1">
+                                {permit.requiredDocs.map((doc, dIdx) => (
+                                  <li key={dIdx} className="text-[10px] text-gray-600 dark:text-gray-400 flex items-center gap-2">
+                                    <div className="w-1 h-1 bg-indigo-400 rounded-full" />
+                                    {doc}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </motion.div>
               ))
             ) : (

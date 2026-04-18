@@ -43,3 +43,39 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
+
+export interface ApiErrorInfo {
+  error: string;
+  service: string;
+  endpoint?: string;
+  status?: number;
+  isQuotaExceeded: boolean;
+  timestamp: string;
+}
+
+export function handleApiError(error: unknown, service: string, endpoint?: string) {
+  const message = error instanceof Error ? error.message : String(error);
+  const isQuotaExceeded = 
+    message.includes('429') || 
+    message.includes('RESOURCE_EXHAUSTED') || 
+    message.toLowerCase().includes('quota') ||
+    message.toLowerCase().includes('exceeded quota') ||
+    (error as any)?.status === 429;
+
+  const errInfo: ApiErrorInfo = {
+    error: message,
+    service,
+    endpoint,
+    isQuotaExceeded,
+    timestamp: new Date().toISOString()
+  };
+
+  console.error(`API Error [${service}]:`, JSON.stringify(errInfo));
+  
+  // Return a user-friendly message
+  if (isQuotaExceeded) {
+    throw new Error(`The ${service} service is currently busy (quota exceeded). Please try again in a few minutes.`);
+  }
+  
+  throw new Error(`An error occurred while communicating with ${service}. Please try again later.`);
+}

@@ -19,6 +19,7 @@ interface FIR {
   website?: string;
   sop?: string;
   documentationUrl?: string;
+  updatedAt?: string;
 }
 
 export default function FIRDatabase() {
@@ -51,10 +52,52 @@ export default function FIRDatabase() {
       const snapshot = await getDocs(q);
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FIR));
       setFirs(data);
+      
+      // Trigger automatic background check for missing or outdated charges
+      checkAndAutoFetch(data);
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, 'firs');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkAndAutoFetch = async (data: FIR[]) => {
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.setDate(now.getDate() - 30));
+
+    const needsUpdate = data.filter(fir => {
+      const isMissing = !fir.overflightCharge || fir.overflightCharge === 0;
+      const isOutdated = fir.updatedAt ? new Date(fir.updatedAt) < thirtyDaysAgo : false;
+      return isMissing || isOutdated;
+    });
+
+    if (needsUpdate.length === 0) return;
+
+    // Limit background auto-fetches to 3 per load to avoid rate limits
+    const batch = needsUpdate.slice(0, 3);
+    
+    for (const fir of batch) {
+      try {
+        const charge = await fetchSpecificCharge(fir.code, fir.name, 'overflight');
+        if (charge > 0) {
+          const firDoc = doc(db, 'firs', fir.id!);
+          await updateDoc(firDoc, { 
+            overflightCharge: charge,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      } catch (err) {
+        console.error(`Auto-fetch failed for ${fir.code}:`, err);
+      }
+    }
+    
+    // Silently refresh data if any updates were made
+    if (batch.length > 0) {
+      const q = query(collection(db, 'firs'), limit(50));
+      const snapshot = await getDocs(q);
+      const refreshedData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FIR));
+      setFirs(refreshedData);
     }
   };
 
@@ -188,7 +231,10 @@ export default function FIRDatabase() {
       const charge = await fetchSpecificCharge(fir.code, fir.name, chargeType);
       if (fir.id) {
         const firDoc = doc(db, 'firs', fir.id);
-        await updateDoc(firDoc, { [`${chargeType}Charge`]: charge });
+        await updateDoc(firDoc, { 
+          [`${chargeType}Charge`]: charge,
+          updatedAt: new Date().toISOString()
+        });
         fetchFirs();
       } else {
         setFormData({ ...formData, [`${chargeType}Charge`]: charge });
@@ -247,7 +293,10 @@ export default function FIRDatabase() {
         if (!fir.phone || !fir.email || !fir.website || !fir.sop || !fir.overflightCharge || !fir.navigationCharge) {
           const details = await getFIRDetails(fir.code, fir.name);
           const firDoc = doc(db, 'firs', fir.id!);
-          await updateDoc(firDoc, { ...details });
+          await updateDoc(firDoc, { 
+            ...details,
+            updatedAt: new Date().toISOString()
+          });
         }
       }
       fetchFirs();
@@ -708,16 +757,23 @@ export default function FIRDatabase() {
                     <p className="text-[8px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Overflight</p>
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-black text-indigo-600 dark:text-indigo-400">${fir.overflightCharge || 0}</p>
-                      {(!fir.overflightCharge || fir.overflightCharge === 0) && (
-                        <button
-                          onClick={() => fetchChargeAI(fir, 'overflight')}
-                          disabled={loading}
-                          className="text-[10px] font-bold bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 px-2 py-1 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-800/50 transition flex items-center gap-1 disabled:opacity-50"
-                          title="Fetch Overflight Charge via AI"
-                        >
-                          <Sparkles size={10} /> Fetch
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {fir.updatedAt && (
+                          <span className="text-[8px] text-gray-400 dark:text-gray-500 font-medium">
+                            Updated {new Date(fir.updatedAt).toLocaleDateString()}
+                          </span>
+                        )}
+                        {(!fir.overflightCharge || fir.overflightCharge === 0) && (
+                          <button
+                            onClick={() => fetchChargeAI(fir, 'overflight')}
+                            disabled={loading}
+                            className="text-[10px] font-bold bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 px-2 py-1 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-800/50 transition flex items-center gap-1 disabled:opacity-50"
+                            title="Fetch Overflight Charge via AI"
+                          >
+                            <Sparkles size={10} /> Fetch
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="bg-gray-50 dark:bg-gray-900/50 p-3 rounded-2xl border border-gray-100 dark:border-gray-700 flex flex-col justify-between">

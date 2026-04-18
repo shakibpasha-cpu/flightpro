@@ -17,7 +17,14 @@ import {
   Wind,
   ChevronLeft,
   ChevronRight,
-  Globe
+  Globe,
+  Activity,
+  Webhook,
+  CreditCard,
+  Database,
+  Cpu,
+  Calculator,
+  TrendingUp
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -30,19 +37,43 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'advanced-quote', label: 'Advanced Quote', icon: Zap },
+    { id: 'multileg-planner', label: 'Multi-Leg Planner', icon: MapPin },
+    { id: 'booking-flow', label: 'Booking Wizard', icon: Plane },
+    { id: 'ai-intelligence', label: 'AI Intelligence', icon: Sparkles },
+    { id: 'optimizer', label: 'Route Optimizer', icon: Zap },
     { id: 'quotes', label: 'Charter Quotes', icon: Zap },
+    { id: 'acmi', label: 'ACMI Marketplace', icon: Globe },
+    { id: 'acmi-pricing', label: 'ACMI Pricing Engine', icon: Calculator },
+    { id: 'database', label: 'ACMI Database', icon: Database },
+    { id: 'aoc-database', label: 'AOC Database', icon: Database },
+    { id: 'aoc-scraper', label: 'AOC Scraper Engine', icon: Cpu },
+    { id: 'aoc-sources', label: 'AOC Source Directory', icon: Globe },
+    { id: 'authority-intelligence', label: 'Authority Intelligence', icon: ShieldCheck },
+    { id: 'availability-intelligence', label: 'Availability Intelligence', icon: Sparkles },
+    { id: 'tracking', label: 'Live Fleet Tracking', icon: Activity },
+    { id: 'automation', label: 'Native Automation', icon: Webhook },
+    { id: 'scraper', label: 'Market Scraper', icon: Globe },
+    { id: 'intelligence', label: 'Market Intelligence', icon: BarChart3 },
     { id: 'planner', label: 'AI Planner', icon: Sparkles },
     { id: 'manual', label: 'Manual Quote', icon: PlusCircle },
     { id: 'emptylegs', label: 'Empty Legs', icon: Wind },
     { id: 'leads', label: 'Leads & CRM', icon: Users },
+    { id: 'billing', label: 'Billing & Plans', icon: CreditCard },
+    { id: 'operators', label: 'Operator Network', icon: Building2 },
     { id: 'aircraft', label: 'Aircraft Fleet', icon: Plane },
+    { id: 'availability', label: 'Availability', icon: Calendar },
     { id: 'airports', label: 'Airports', icon: MapPin },
     { id: 'firs', label: 'FIR Database', icon: Globe },
+    { id: 'routes', label: 'Routes', icon: Globe },
     { id: 'schedules', label: 'Schedules', icon: Calendar },
     { id: 'handling', label: 'Handling Agents', icon: Building2 },
     { id: 'reports', label: 'Analytics', icon: BarChart3 },
+    { id: 'feasibility', label: 'Feasibility Report', icon: TrendingUp },
     { id: 'pricing', label: 'Pricing Engine', icon: Settings },
+    { id: 'pricing-rules', label: 'Pricing Rules', icon: Settings },
     { id: 'history', label: 'History', icon: History },
+    { id: 'pitch-deck', label: 'Investor Pitch Deck', icon: BarChart3 },
   ];
 
   return (

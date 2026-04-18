@@ -1,5 +1,5 @@
 import React from 'react';
-import { Fuel, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { Fuel, AlertTriangle, CheckCircle2, Info, Loader2, Zap } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface FuelPlanProps {
@@ -13,6 +13,11 @@ interface FuelPlanProps {
   fuelBurnPerHour: number;
   stopsNeeded: boolean;
   suggestedStops?: string[];
+  hasLongLeg?: boolean;
+  onAddStop?: (icao: string) => void;
+  onSuggestStops?: () => void;
+  isSuggesting?: boolean;
+  detailedSuggestions?: any[];
 }
 
 export default function FuelPlan({
@@ -25,7 +30,12 @@ export default function FuelPlan({
   totalDistance,
   fuelBurnPerHour,
   stopsNeeded,
-  suggestedStops
+  suggestedStops,
+  hasLongLeg,
+  onAddStop,
+  onSuggestStops,
+  isSuggesting,
+  detailedSuggestions
 }: FuelPlanProps) {
   const fuelEfficiency = totalDistance > 0 ? (totalFuelRequired / totalDistance).toFixed(2) : 0;
 
@@ -90,33 +100,69 @@ export default function FuelPlan({
           animate={{ opacity: 1, y: 0 }}
           className="bg-amber-50 dark:bg-amber-900/20 p-5 rounded-3xl border border-amber-100 dark:border-amber-800/50"
         >
-          <div className="flex items-center gap-2 text-amber-700 dark:text-amber-500 mb-4">
-            <Info size={18} />
-            <span className="text-xs font-black uppercase tracking-widest">Fuel Stop Strategy</span>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-500">
+              <Info size={18} />
+              <span className="text-xs font-black uppercase tracking-widest">Fuel Stop Strategy</span>
+            </div>
+            {onSuggestStops && (
+              <button
+                onClick={onSuggestStops}
+                disabled={isSuggesting}
+                className="flex items-center gap-1.5 px-3 py-1 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400 rounded-lg text-[10px] font-bold uppercase tracking-widest hover:bg-amber-200 dark:hover:bg-amber-900/60 transition-all border border-amber-200 dark:border-amber-800/50 disabled:opacity-50"
+              >
+                {isSuggesting ? <Loader2 className="animate-spin" size={12} /> : <Zap size={12} />}
+                <span>Find Optimal Stops</span>
+              </button>
+            )}
           </div>
           
-          {suggestedStops && suggestedStops.length > 0 ? (
+          {detailedSuggestions && detailedSuggestions.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              {detailedSuggestions.map((stop, idx) => (
+                <div key={idx} className="bg-white dark:bg-gray-800 p-3 rounded-xl border border-amber-100 dark:border-amber-800/50 shadow-sm relative group overflow-hidden">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <p className="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase">{stop.icao}</p>
+                      <p className="text-[9px] font-bold text-gray-700 dark:text-gray-300 truncate max-w-[120px]">{stop.name}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[9px] font-black text-emerald-600 dark:text-emerald-400">${stop.fuelPrice}/L</p>
+                      <p className="text-[8px] text-gray-400 uppercase font-bold">Landing: ${stop.landingFee}</p>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-gray-500 dark:text-gray-400 italic mb-3 line-clamp-2">{stop.reason}</p>
+                  <button
+                    onClick={() => onAddStop?.(stop.icao)}
+                    className="w-full py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[9px] font-black uppercase tracking-widest transition-all"
+                  >
+                    Add to Itinerary
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : suggestedStops && suggestedStops.length > 0 ? (
             <div className="space-y-4">
               <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-hide">
                 {suggestedStops.map((stop, idx) => (
                   <React.Fragment key={idx}>
-                    <div className="flex flex-col items-center gap-2 min-w-[100px]">
-                      <div className="w-10 h-10 bg-white dark:bg-gray-800 rounded-2xl border-2 border-amber-200 dark:border-amber-800/50 flex items-center justify-center text-amber-600 dark:text-amber-400 font-black text-xs shadow-sm">
+                    <button 
+                      onClick={() => onAddStop?.(stop)}
+                      className="flex flex-col items-center gap-2 min-w-[100px] group"
+                    >
+                      <div className="w-10 h-10 bg-white dark:bg-gray-800 rounded-2xl border-2 border-amber-200 dark:border-amber-800/50 flex items-center justify-center text-amber-600 dark:text-amber-400 font-black text-xs shadow-sm group-hover:bg-amber-500 group-hover:text-white group-hover:border-amber-500 transition-all">
                         {stop.length <= 4 ? stop : `S${idx + 1}`}
                       </div>
-                      <span className="text-[10px] font-bold text-amber-800 dark:text-amber-400 uppercase truncate max-w-[120px]">
+                      <span className="text-[10px] font-bold text-amber-800 dark:text-amber-400 uppercase truncate max-w-[120px] group-hover:text-amber-600 transition-colors">
                         {stop}
                       </span>
-                    </div>
+                    </button>
                     {idx < suggestedStops.length - 1 && (
                       <div className="h-0.5 w-8 bg-amber-200 dark:bg-amber-800/50 mt-[-20px]" />
                     )}
                   </React.Fragment>
                 ))}
               </div>
-              <p className="text-[10px] text-amber-600 dark:text-amber-500/70 italic">
-                * Intermediate fuel stops are required to maintain safety reserves for this {totalDistance?.toLocaleString()}nm mission.
-              </p>
             </div>
           ) : (
             <div className="flex flex-col items-center py-4 text-center">
@@ -127,6 +173,13 @@ export default function FuelPlan({
               </p>
             </div>
           )}
+
+          <p className="text-[10px] text-amber-600 dark:text-amber-500/70 italic mt-4">
+            {hasLongLeg 
+              ? `* One or more legs exceed 85% of the aircraft's range (${aircraftRange}nm). Optimal fuel stops have been suggested for safety.`
+              : `* Intermediate fuel stops are required to maintain safety reserves for this ${totalDistance?.toLocaleString()}nm mission.`
+            }
+          </p>
         </motion.div>
       )}
     </div>

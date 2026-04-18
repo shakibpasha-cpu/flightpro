@@ -2,7 +2,7 @@
 
 ## 1. System Architecture & Multi-Tenant Strategy
 
-The platform uses a **Single Database, Multi-Tenant** architecture with Row-Level Security (RLS) in PostgreSQL to ensure data isolation between charter companies.
+The platform uses a **Single Database, Multi-Tenant** architecture with Row-Level Security (RLS) in PostgreSQL to ensure data isolation between charter companies. The RLS policies are implemented in \`db/rls_setup.sql\`.
 
 ### User Roles
 1. **Super Admin (Platform Owner):** Manages tenants (companies), global aircraft database, billing (Stripe), and platform-wide settings.
