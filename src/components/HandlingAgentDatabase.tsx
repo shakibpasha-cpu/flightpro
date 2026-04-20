@@ -193,7 +193,7 @@ export default function HandlingAgentDatabase() {
     setSuggesting(true);
     setSuggestedAgents([]);
     try {
-      const result = await searchHandlingAgents(formData.icao);
+      const result = await searchHandlingAgents(formData.icao, undefined, undefined, undefined, true);
       if (result.agents && result.agents.length > 0) {
         setSuggestedAgents(result.agents.map((a: any) => ({ ...a, icao: formData.icao })));
       } else {
@@ -609,8 +609,51 @@ export default function HandlingAgentDatabase() {
           {filteredAgents.length === 0 && !loading && (
             <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-3xl border border-dashed border-gray-200 dark:border-gray-700">
               <Building2 size={48} className="mx-auto text-gray-200 dark:text-gray-600 mb-4" />
-              <p className="text-gray-400 dark:text-gray-500 font-bold uppercase tracking-widest text-xs">No handling agents found</p>
-              <p className="text-gray-400 dark:text-gray-500 text-xs mt-2">Try adjusting your search or add a new agent.</p>
+              <p className="text-gray-400 dark:text-gray-500 font-bold uppercase tracking-widest text-xs">No handling agents found locally</p>
+              <p className="text-gray-400 dark:text-gray-500 text-xs mt-2 mb-6">Try adjusting your search or add a new agent.</p>
+              
+              {searchQuery.trim().length >= 3 && searchQuery.trim().length <= 4 && (
+                <button
+                  onClick={async () => {
+                    setLoading(true);
+                    try {
+                      // Attempt a deep search (forceRefresh = true to bypass stale global contacts)
+                      const result = await searchHandlingAgents(searchQuery.trim().toUpperCase(), undefined, undefined, undefined, true);
+                      if (result.agents && result.agents.length > 0) {
+                        // Persist these to the database
+                        for (const agent of result.agents) {
+                          await addDoc(collection(db, 'handlingAgents'), {
+                            icao: searchQuery.trim().toUpperCase(),
+                            companyName: agent.companyName,
+                            email: agent.email || '',
+                            phone: agent.phone || '',
+                            website: agent.website || '',
+                            baseFee: agent.baseFee || 0,
+                            additionalServices: agent.additionalServices || '',
+                            aircraftRates: agent.aircraftRates || []
+                          });
+                        }
+                        // Refresh the list
+                        await fetchAgents();
+                        setSearchQuery(''); 
+                        alert(`Successfully added ${result.agents.length} handling agent(s) for ${searchQuery.trim().toUpperCase()}!`);
+                      } else {
+                        alert('No handling agents could be found using AI for this airport.');
+                      }
+                    } catch (error) {
+                      console.error(error);
+                      alert('An error occurred while exploring handling agents with AI.');
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  disabled={loading}
+                  className="mx-auto bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-6 py-3 rounded-full font-bold flex items-center justify-center gap-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition border border-indigo-100 dark:border-indigo-800/50 text-sm shadow-sm"
+                >
+                  <Sparkles size={16} />
+                  Deep Search AI for "{searchQuery.trim().toUpperCase()}"
+                </button>
+              )}
             </div>
           )}
 
@@ -620,6 +663,7 @@ export default function HandlingAgentDatabase() {
             </div>
           )}
         </div>
+
       </div>
     </div>
   );

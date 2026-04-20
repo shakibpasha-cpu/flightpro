@@ -15,6 +15,7 @@ interface FIR {
     email: string;
     website: string;
     sop: string;
+    rules?: string;
     documentationUrl: string;
   };
 }
@@ -242,11 +243,14 @@ function FIRCard({ fir, fetchingDetails, onFetchDetails }: { fir: FIR, fetchingD
         </div>
         <div className="flex items-center gap-4">
           <div className="text-right">
-            <div className="text-sm font-bold text-indigo-600 dark:text-indigo-400">
-              ${((fir.overflightCharge || 0) + (fir.navigationCharge || 0))?.toLocaleString()}
-            </div>
-            <div className="text-[10px] text-gray-400 dark:text-gray-500 uppercase font-bold">
-              {fir.overflightCharge > 0 && fir.navigationCharge > 0 ? 'Overflight + Nav' : fir.overflightCharge > 0 ? 'Overflight Fee' : 'Nav Fee'}
+            <div className="flex flex-col items-end">
+              <span className="text-sm font-black text-indigo-600 dark:text-indigo-400">
+                ${((fir.overflightCharge || 0) + (fir.navigationCharge || 0))?.toLocaleString()}
+              </span>
+              <div className="flex gap-2 text-[8px] text-gray-400 dark:text-gray-500 font-black uppercase tracking-tighter">
+                <span>Ovf: ${(fir.overflightCharge || 0).toLocaleString()}</span>
+                <span>Nav: ${(fir.navigationCharge || 0).toLocaleString()}</span>
+              </div>
             </div>
           </div>
           {!fir.details && (
@@ -313,9 +317,9 @@ function FIRCard({ fir, fetchingDetails, onFetchDetails }: { fir: FIR, fetchingD
               </div>
             </div>
             <div className="space-y-1.5">
-              <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Standard Operating Procedures</p>
+              <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Specific Operating Rules</p>
               <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-relaxed bg-gray-50 dark:bg-gray-900/50 p-2 rounded-lg border border-gray-100 dark:border-gray-800">
-                {fir.details.sop}
+                {fir.details.rules || fir.details.sop}
               </p>
             </div>
           </motion.div>

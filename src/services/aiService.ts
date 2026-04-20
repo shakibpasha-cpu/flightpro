@@ -1897,22 +1897,29 @@ export async function getOptimizationAlternatives(plan: any, criteria: string) {
   }
 }
 
-export async function searchHandlingAgents(icao: string, airportName?: string, city?: string, aircraftType?: string) {
-  // 1. Try to fetch from Firestore cache
-  const agentsRef = collection(db, 'handling_agents');
-  const q = query(agentsRef, where('icao', '==', icao), limit(1));
-  const snapshot = await getDocs(q);
-  if (!snapshot.empty) {
-    return snapshot.docs[0].data() as { agents: any[] };
+export async function searchHandlingAgents(icao: string, airportName?: string, city?: string, aircraftType?: string, forceRefresh: boolean = false) {
+  // 1. Try to fetch from Firestore cache if not forcing refresh
+  if (!forceRefresh) {
+    const agentsRef = collection(db, 'handling_agents');
+    const q = query(agentsRef, where('icao', '==', icao), limit(1));
+    const snapshot = await getDocs(q);
+    if (!snapshot.empty) {
+      return snapshot.docs[0].data() as { agents: any[] };
+    }
   }
 
   // 2. If not in cache, use Gemini
   const prompt = `Find real, active ground handling companies at ${airportName || icao} (${icao})${city ? ` in ${city}` : ''}${aircraftType ? ` for a ${aircraftType} aircraft` : ''}. 
   Use Google Search to find the most accurate and up-to-date information.
-  Provide a list of up to 3 companies with their:
-  - Company Name
-  - Contact Email (real business email if possible)
-  - Contact Phone (with country code)
+  
+  CRITICAL INSTRUCTION: We need LOCAL handling agents physically present at this specific airport. 
+  Do NOT return global corporate headquarters phone numbers or generic global info@ emails.
+  If it is a major network (like Swissport, dnata, Menzies, Jetex), you MUST find the local station's operational phone number and ops email specifically for ${icao}.
+
+  Provide a list of up to 4 companies with their:
+  - Company Name (append the station/airport to distinguish it, e.g., "dnata OPLA")
+  - Contact Email (local station email, e.g., ops.opla@... or similar local business email)
+  - Contact Phone (local operations phone, with country code)
   - Website URL
   - Estimated Base Handling Fee (USD) - provide a realistic estimate based on the airport and aircraft type
   - Additional Services (e.g., VIP lounge, fuel, catering, customs)
@@ -2384,11 +2391,13 @@ export async function getFIRDetails(firCode: string, firName: string, aircraftTy
   4. DOCUMENTATION: Provide direct links to official AICs, fee schedules, or AIP portals.
   
   Return the exactly structured JSON object: {
+    firName: string,
+    country: string,
     address: string,
     phone: string,
     email: string,
     website: string,
-    sop: string,
+    rules: string,
     documentationUrl: string,
     overflightCharge: number,
     navigationCharge: number
@@ -2405,7 +2414,12 @@ export async function getFIRDetails(firCode: string, firName: string, aircraftTy
     });
 
     const text = response.text.replace(/```json\n?/, '').replace(/```/, '');
-    return JSON.parse(text);
+    const result = JSON.parse(text);
+    
+    // Fallback names if missing from JSON structure but present in prompt mapping
+    if (result.sop && !result.rules) result.rules = result.sop;
+    
+    return result;
   } catch (error) {
     handleAiError(error, 'getFIRDetails');
     return null;

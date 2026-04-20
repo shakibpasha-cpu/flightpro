@@ -1442,10 +1442,29 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
                                                   </div>
                                                 </div>
                                                 {fir.address && (
-                                                  <div className="mt-2 text-[9px] text-gray-600 dark:text-gray-400 space-y-1">
-                                                    <p>{fir.address}</p>
-                                                    <p>{fir.phone} | {fir.email}</p>
-                                                    <p className="italic">{fir.rules}</p>
+                                                  <div className="mt-2 text-[9px] text-gray-600 dark:text-gray-400 space-y-1 bg-white/50 dark:bg-black/20 p-2 rounded-lg border border-indigo-50 dark:border-indigo-900/10">
+                                                    <p className="flex justify-between">
+                                                      <span className="opacity-60 uppercase font-black text-[7px] tracking-tighter">Address:</span>
+                                                      <span className="text-right">{fir.address}</span>
+                                                    </p>
+                                                    <p className="flex justify-between">
+                                                      <span className="opacity-60 uppercase font-black text-[7px] tracking-tighter">Contact:</span>
+                                                      <span className="text-right">{fir.phone} | {fir.email}</span>
+                                                    </p>
+                                                    <div className="pt-1 mt-1 border-t border-indigo-50/50 dark:border-indigo-900/10 grid grid-cols-2 gap-2">
+                                                      <div>
+                                                        <span className="opacity-60 uppercase font-black text-[7px] tracking-tighter block mb-0.5">Overflight</span>
+                                                        <span className="font-black text-indigo-600 dark:text-indigo-400">${(fir.overflightCharge || 0).toLocaleString()}</span>
+                                                      </div>
+                                                      <div>
+                                                        <span className="opacity-60 uppercase font-black text-[7px] tracking-tighter block mb-0.5">Navigation</span>
+                                                        <span className="font-black text-indigo-600 dark:text-indigo-400">${(fir.navigationCharge || 0).toLocaleString()}</span>
+                                                      </div>
+                                                    </div>
+                                                    <div className="pt-2 mt-1 border-t border-indigo-50/50 dark:border-indigo-900/10 italic leading-tight text-gray-400">
+                                                      <span className="block font-black uppercase text-[7px] mb-1 not-italic opacity-50">Operating Rules:</span>
+                                                      {fir.rules}
+                                                    </div>
                                                   </div>
                                                 )}
                                                 <div className="grid grid-cols-2 gap-2 mt-2">
