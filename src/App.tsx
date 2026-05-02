@@ -4,7 +4,7 @@
  */
 
 import { useState, FormEvent, useEffect } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Plane, MapPin, Calendar, Users, Weight, Loader2, Sparkles, LayoutDashboard, History, Trash2, Plus, Moon, Sun, ChevronLeft, ChevronRight, ShieldCheck, FileText, MessageSquare, Fuel } from 'lucide-react';
 import { generateQuotePDF } from './utils/pdfGenerator';
 import { getSuggestedAircraft, getOptimizedRoute, getWindImpact, getMultiLegRouteDetails, searchAirports, generateACMIQuote, searchHandlingAgents, getFIRDetails, getFuelStopSuggestions } from './services/aiService';
@@ -56,6 +56,7 @@ import BillingDashboard from './components/BillingDashboard';
 import ACMIQuoteEngine from './components/ACMIQuoteEngine';
 import AdvancedQuoteEngine from './components/AdvancedQuoteEngine';
 import MultiLegFlightPlanner from './components/MultiLegFlightPlanner';
+import AeronauticalCharts from './components/AeronauticalCharts';
 import AuthorityIntelligence from './components/AuthorityIntelligence';
 import AvailabilityIntelligence from './components/AvailabilityIntelligence';
 import FeasibilityReport from './components/FeasibilityReport';
@@ -63,6 +64,7 @@ import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import Breadcrumbs from './components/Breadcrumbs';
 import PitchDeck from './components/PitchDeck';
+import { QuotaMonitor } from './components/QuotaMonitor';
 
 export default function App() {
   const [formData, setFormData] = useState({
@@ -105,6 +107,7 @@ export default function App() {
   const [aiLayerDefaultTab, setAiLayerDefaultTab] = useState<'prediction' | 'optimization' | 'risk' | 'emptylegs' | 'negotiation'>('prediction');
   const [isOptimizingFuel, setIsOptimizingFuel] = useState(false);
   const [fuelStopSuggestions, setFuelStopSuggestions] = useState<any[]>([]);
+  const [activeMapInput, setActiveMapInput] = useState<'departure' | 'destination' | 'none'>('departure');
 
   useEffect(() => {
     if (isDarkMode) {
@@ -435,42 +438,61 @@ export default function App() {
       const activeLegs = aiPlan?.legs || quoteOptions?.[selectedOption]?.legs || acmiQuote?.legs;
       
       if (activeLegs && activeLegs.length > 0) {
-        const lastLeg = activeLegs[activeLegs.length - 1];
-        const newLeg = {
-          departure: lastLeg.destination,
-          destination: code,
-          departureCoords: lastLeg.destinationCoords,
-          destinationCoords: coords,
-        };
-        handleLegsUpdate([...activeLegs, newLeg], true);
-      } else {
-        if (!formData.departure) {
+        // Only append leg if map input is not set (i.e., user is generally interacting)
+        if (activeMapInput === 'none') {
+          const lastLeg = activeLegs[activeLegs.length - 1];
+          const newLeg = {
+            departure: lastLeg.destination,
+            destination: code,
+            departureCoords: lastLeg.destinationCoords,
+            destinationCoords: coords,
+          };
+          handleLegsUpdate([...activeLegs, newLeg], true);
+        } else if (activeMapInput === 'departure') {
           setFormData({ ...formData, departure: code });
-        } else if (!formData.destination) {
+          setActiveMapInput('destination'); // Auto-switch focus
+        } else if (activeMapInput === 'destination') {
           setFormData({ ...formData, destination: code });
+          setActiveMapInput('none');
+        }
+      } else {
+        if (activeMapInput === 'departure') {
+          setFormData({ ...formData, departure: code });
+          setActiveMapInput('destination');
+        } else if (activeMapInput === 'destination') {
+          setFormData({ ...formData, destination: code });
+          setActiveMapInput('none');
         } else {
-          // If we have departure and destination but no active legs yet, create the first leg
-          const departureResult = await searchAirports(formData.departure);
-          const destResult = await searchAirports(formData.destination);
-          
-          if (departureResult.airports?.[0] && destResult.airports?.[0]) {
-            const dep = departureResult.airports[0];
-            const dest = destResult.airports[0];
-            const initialLeg = {
-              departure: formData.departure,
-              destination: code,
-              departureCoords: { lat: dep.lat, lng: dep.lng },
-              destinationCoords: coords
-            };
-            const secondLeg = {
-              departure: code,
-              destination: formData.destination,
-              departureCoords: coords,
-              destinationCoords: { lat: dest.lat, lng: dest.lng }
-            };
-            handleLegsUpdate([initialLeg, secondLeg], true);
+          if (!formData.departure) {
+            setFormData({ ...formData, departure: code });
+            setActiveMapInput('destination');
+          } else if (!formData.destination) {
+            setFormData({ ...formData, destination: code });
+            setActiveMapInput('none');
           } else {
-            setFormData({ ...formData, stopovers: [...formData.stopovers, code] });
+            // If we have departure and destination but no active legs yet, create the first leg
+            const departureResult = await searchAirports(formData.departure);
+            const destResult = await searchAirports(formData.destination);
+            
+            if (departureResult.airports?.[0] && destResult.airports?.[0]) {
+              const dep = departureResult.airports[0];
+              const dest = destResult.airports[0];
+              const initialLeg = {
+                departure: formData.departure,
+                destination: code,
+                departureCoords: { lat: dep.lat, lng: dep.lng },
+                destinationCoords: coords
+              };
+              const secondLeg = {
+                departure: code,
+                destination: formData.destination,
+                departureCoords: coords,
+                destinationCoords: { lat: dest.lat, lng: dest.lng }
+              };
+              handleLegsUpdate([initialLeg, secondLeg], true);
+            } else {
+              setFormData({ ...formData, stopovers: [...formData.stopovers, code] });
+            }
           }
         }
       }
@@ -550,8 +572,8 @@ export default function App() {
             fuelBurnPerHour: master.fuel_burn_kg_per_hr || 2500,
             cruiseSpeed: master.cruise_speed_kts || 450,
             range: master.range_nm || 3000,
-            maxPayload: master.payload_kg || 20000,
-            maxPassengers: master.passenger_capacity || 0,
+            maxPayload: master.payload_kg || master.maxPayload || 20000,
+            maxPassengers: master.passenger_capacity || master.seats?.max || (typeof master.seats === 'number' ? master.seats : 0),
             hourlyRate: l.acmi_rate_per_hr || 0,
             acmiRate: l.acmi_rate_per_hr || 0,
             category: master.category || 'Commercial',
@@ -589,7 +611,7 @@ export default function App() {
         let handlingAgents = [];
         try {
           const agentsResult = await searchHandlingAgents(match.icao || match.iata || code, formData.aircraftPreference);
-          handlingAgents = agentsResult.agents || [];
+          handlingAgents = (agentsResult.agents || []).slice(0, 3);
         } catch (err) {
           console.error(`Error fetching handling agents for ${code}:`, err);
         }
@@ -957,6 +979,7 @@ export default function App() {
 
   return (
     <div className={`flex h-screen overflow-hidden ${isDarkMode ? 'dark bg-gray-900' : 'bg-gray-50'}`}>
+      <QuotaMonitor />
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
       
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -988,7 +1011,15 @@ export default function App() {
             />
           </div>
 
-          {activeTab === 'dashboard' ? (
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              {activeTab === 'dashboard' ? (
             <div className="max-w-7xl mx-auto">
               <DashboardOverview />
             </div>
@@ -1016,6 +1047,10 @@ export default function App() {
                 defaultTab={aiLayerDefaultTab}
                 onRouteOptimized={setOptimizedRoute}
               />
+            </div>
+          ) : activeTab === 'aeronautical-charts' ? (
+            <div className="max-w-7xl mx-auto">
+              <AeronauticalCharts />
             </div>
           ) : activeTab === 'reports' ? (
             <div className="max-w-7xl mx-auto">
@@ -1358,6 +1393,8 @@ export default function App() {
                     onPlanChange={(plan) => setAiPlan(plan)}
                     onHoverLeg={setHoveredLegIndex}
                     formData={formData}
+                    onFormDataChange={setFormData}
+                    setActiveMapInput={setActiveMapInput}
                     currentQuoteLegs={quoteOptions?.[selectedOption]?.legs}
                   />
                 </div>
@@ -1396,12 +1433,17 @@ export default function App() {
                           />
                         </div>
                         <div className="relative">
-                          <MapPin className="absolute left-3 top-3 text-gray-400 dark:text-gray-500" size={20} />
+                          <MapPin className={`absolute left-3 top-3 ${activeMapInput === 'departure' ? 'text-indigo-500' : 'text-gray-400 dark:text-gray-500'}`} size={20} />
                           <input 
                             type="text" 
                             placeholder="Departure (IATA/ICAO)" 
                             value={formData.departure}
-                            className="w-full pl-10 p-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            onFocus={() => setActiveMapInput('departure')}
+                            className={`w-full pl-10 p-2 border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none transition-all ${
+                              activeMapInput === 'departure' 
+                                ? 'border-indigo-500 ring-2 ring-indigo-500/20' 
+                                : 'border-gray-200 dark:border-gray-600 focus:border-indigo-500'
+                            }`}
                             onChange={(e) => setFormData({...formData, departure: e.target.value.toUpperCase()})}
                           />
                           {airportDetails[formData.departure] && (
@@ -1466,12 +1508,17 @@ export default function App() {
                         </button>
 
                         <div className="relative">
-                          <MapPin className="absolute left-3 top-3 text-gray-400 dark:text-gray-500" size={20} />
+                          <MapPin className={`absolute left-3 top-3 ${activeMapInput === 'destination' ? 'text-indigo-500' : 'text-gray-400 dark:text-gray-500'}`} size={20} />
                           <input 
                             type="text" 
                             placeholder="Destination (IATA/ICAO)" 
                             value={formData.destination}
-                            className="w-full pl-10 p-2 border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            onFocus={() => setActiveMapInput('destination')}
+                            className={`w-full pl-10 p-2 border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 outline-none transition-all ${
+                              activeMapInput === 'destination' 
+                                ? 'border-indigo-500 ring-2 ring-indigo-500/20' 
+                                : 'border-gray-200 dark:border-gray-600 focus:border-indigo-500'
+                            }`}
                             onChange={(e) => setFormData({...formData, destination: e.target.value.toUpperCase()})}
                           />
                           {airportDetails[formData.destination] && (
@@ -1849,7 +1896,9 @@ export default function App() {
             </div>
           </div>
         )}
-      </main>
+      </motion.div>
+    </AnimatePresence>
+</main>
       <ChatAssistant context={{ formData, aiPlan, quoteOptions, acmiQuote }} />
       </div>
     </div>

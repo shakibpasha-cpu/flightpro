@@ -79,6 +79,7 @@ export interface CostBreakdown {
   parkingFee: number;
   crew: number;
   positioning: number;
+  catering: number;
   marketAdjustment: number;
   riskAdjustment: number;
   insurance: number;
@@ -388,8 +389,20 @@ export async function calculateACMIMission(
 
   // D. Crew Cost Model
   const crewCost = calculateCrewCosts(blockHours, 1200, 10, params.numberOfDays || 1);
-
-  // E. Positioning Cost Model
+  
+  // E. Catering Cost Model
+  const missionLower = params.missionType?.toLowerCase() || '';
+  const isPassenger = missionLower.includes('passenger') || missionLower.includes('pax');
+  const isVip = missionLower.includes('vip');
+  
+  let cateringCost = 0;
+  if (isPassenger || isVip) {
+    const paxCount = params.passengers || (mtow > 150000 ? 50 : 15);
+    const perPaxRate = isVip ? 150 : 25;
+    cateringCost = paxCount * perPaxRate;
+  }
+  
+  // F. Positioning Cost Model
   let positioningCost = 0;
   const posDist = Math.random() * 1200; // Simulated positioning distance if base unknown
   positioningCost = calculatePositioningCost(posDist, cruiseSpeed, finalRate, fuelBurnRate, fuelPrice);
@@ -434,6 +447,7 @@ export async function calculateACMIMission(
     airportCharges: airportTotal,
     crewCost,
     positioningCost,
+    cateringCost,
     marketMultiplier,
     riskMultiplier,
     contingencyRate: 0.05,
@@ -480,6 +494,7 @@ export async function calculateACMIMission(
       parkingFee: Math.round(parkingFee),
       crew: Math.round(crewCost),
       positioning: Math.round(positioningCost),
+      catering: Math.round(cateringCost),
       marketAdjustment: Math.round(projectResult.marketAdjustment),
       riskAdjustment: Math.round(projectResult.riskAdjustment),
       insurance: Math.round(projectResult.riskAdjustment),
@@ -514,7 +529,16 @@ export async function suggestCheaperAlternatives(params: MissionParams, currentA
 
     for (const listing of otherListings) {
       try {
-        const masterData = masterMap.get(listing.aircraft_id);
+        const masterData = masterMap.get(listing.aircraft_id) as any;
+        if (!masterData) continue;
+
+        // CRITICAL CAPACITY CHECK: Ensure alternative aircraft actually fits the requirement
+        const capacityMatches = params.missionType === 'Cargo' 
+          ? (masterData.payload_kg || 0) >= params.payload
+          : (masterData.passenger_capacity || 0) >= params.passengers;
+
+        if (!capacityMatches) continue;
+
         const result = await calculateACMIMission(params, listing.id, { 
           routeDetails, 
           multipliers,

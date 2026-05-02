@@ -1,5 +1,13 @@
 import React from 'react';
-import { DollarSign, ChevronDown, ChevronUp, Users, Mail, Phone, CheckCircle2 } from 'lucide-react';
+import { DollarSign, ChevronDown, ChevronUp, Users, Mail, Phone, CheckCircle2, ShieldCheck, Tag } from 'lucide-react';
+
+const sortHandlingAgents = (agents: HandlingAgent[]) => {
+  return [...agents].sort((a, b) => {
+    const aScore = (a.aiVerifiedPremium ? 2 : 0) + (a.discount ? 1 : 0);
+    const bScore = (b.aiVerifiedPremium ? 2 : 0) + (b.discount ? 1 : 0);
+    return bScore - aScore;
+  });
+};
 import { motion, AnimatePresence } from 'motion/react';
 
 interface CostBreakdown {
@@ -38,6 +46,9 @@ interface HandlingAgent {
   website: string;
   baseFee: number;
   additionalServices: string;
+  discount?: boolean;
+  discountDetails?: string;
+  aiVerifiedPremium?: boolean;
 }
 
 interface Leg {
@@ -241,7 +252,7 @@ export default function CostingEngine({ legs, totalCosts, currency = '$', onLegC
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                           {leg.departureHandlingAgents && leg.departureHandlingAgents.length > 0 ? (
-                            leg.departureHandlingAgents.map((agent, agentIdx) => {
+                            sortHandlingAgents(leg.departureHandlingAgents).map((agent, agentIdx) => {
                               const isSelected = leg.selectedDepartureHandlingAgent?.companyName === agent.companyName;
                               return (
                                 <div 
@@ -250,12 +261,31 @@ export default function CostingEngine({ legs, totalCosts, currency = '$', onLegC
                                   className={`p-3 rounded-xl border transition-all cursor-pointer relative group ${
                                     isSelected 
                                       ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/20' 
-                                      : 'border-gray-100 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-900/20 bg-white dark:bg-gray-900'
+                                      : agent.aiVerifiedPremium
+                                        ? 'border-amber-200 dark:border-amber-900/30 bg-gradient-to-br from-white to-amber-50 dark:from-gray-900 dark:to-amber-900/10 hover:border-amber-400'
+                                        : 'border-gray-100 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-900/20 bg-white dark:bg-gray-900'
                                   }`}
                                 >
-                                  <div className="flex justify-between items-start mb-2">
-                                    <p className="text-[10px] font-black text-gray-900 dark:text-white truncate pr-4">{agent.companyName}</p>
-                                    <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 shrink-0">{currency}{agent.baseFee}</p>
+                                  <div className="flex justify-between items-start mb-2 gap-2">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <p className="text-[10px] font-black text-gray-900 dark:text-white truncate">{agent.companyName}</p>
+                                        {agent.aiVerifiedPremium && (
+                                          <div className="flex items-center gap-0.5 text-amber-500 bg-amber-50 dark:bg-amber-900/30 px-1 py-0.5 rounded text-[8px] font-bold" title="AI Verified Premium Handler">
+                                            <ShieldCheck size={10} />
+                                            <span>PRO</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="text-right shrink-0 flex flex-col items-end">
+                                      <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400">{currency}{agent.baseFee}</p>
+                                      {agent.discount && (
+                                        <p className="text-[8px] text-fuchsia-600 dark:text-fuchsia-400 font-bold flex items-center gap-0.5" title={agent.discountDetails || "Discount available"}>
+                                          <Tag size={8} /> Discount
+                                        </p>
+                                      )}
+                                    </div>
                                   </div>
                                   <div className="space-y-1">
                                     <div className="flex items-center gap-1.5 text-[8px] text-gray-500 dark:text-gray-400">
@@ -296,7 +326,7 @@ export default function CostingEngine({ legs, totalCosts, currency = '$', onLegC
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                           {leg.handlingAgents && leg.handlingAgents.length > 0 ? (
-                            leg.handlingAgents.map((agent, agentIdx) => {
+                            sortHandlingAgents(leg.handlingAgents).map((agent, agentIdx) => {
                               const isSelected = leg.selectedHandlingAgent?.companyName === agent.companyName;
                               return (
                                 <div 
@@ -305,12 +335,31 @@ export default function CostingEngine({ legs, totalCosts, currency = '$', onLegC
                                   className={`p-3 rounded-xl border transition-all cursor-pointer relative group ${
                                     isSelected 
                                       ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-900/20' 
-                                      : 'border-gray-100 dark:border-gray-700 hover:border-amber-200 dark:hover:border-amber-900/20 bg-white dark:bg-gray-900'
+                                      : agent.aiVerifiedPremium
+                                        ? 'border-amber-200 dark:border-amber-900/30 bg-gradient-to-br from-white to-amber-50 dark:from-gray-900 dark:to-amber-900/10 hover:border-amber-400'
+                                        : 'border-gray-100 dark:border-gray-700 hover:border-amber-200 dark:hover:border-amber-900/20 bg-white dark:bg-gray-900'
                                   }`}
                                 >
-                                  <div className="flex justify-between items-start mb-2">
-                                    <p className="text-[10px] font-black text-gray-900 dark:text-white truncate pr-4">{agent.companyName}</p>
-                                    <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 shrink-0">{currency}{agent.baseFee}</p>
+                                  <div className="flex justify-between items-start mb-2 gap-2">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <p className="text-[10px] font-black text-gray-900 dark:text-white truncate">{agent.companyName}</p>
+                                        {agent.aiVerifiedPremium && (
+                                          <div className="flex items-center gap-0.5 text-amber-500 bg-amber-50 dark:bg-amber-900/30 px-1 py-0.5 rounded text-[8px] font-bold" title="AI Verified Premium Handler">
+                                            <ShieldCheck size={10} />
+                                            <span>PRO</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="text-right shrink-0 flex flex-col items-end">
+                                      <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400">{currency}{agent.baseFee}</p>
+                                      {agent.discount && (
+                                        <p className="text-[8px] text-fuchsia-600 dark:text-fuchsia-400 font-bold flex items-center gap-0.5" title={agent.discountDetails || "Discount available"}>
+                                          <Tag size={8} /> Discount
+                                        </p>
+                                      )}
+                                    </div>
                                   </div>
                                   <div className="space-y-1">
                                     <div className="flex items-center gap-1.5 text-[8px] text-gray-500 dark:text-gray-400">

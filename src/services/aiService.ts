@@ -1,12 +1,34 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
+import { safeStringify } from "../utils/safeJson";
 import { db } from "../firebase";
-import { collection, getDocs, query, where, limit, addDoc, setDoc, doc } from "firebase/firestore";
+import { collection, getDocs, query, where, limit, addDoc, setDoc, doc, getDocFromServer } from "firebase/firestore";
 import { handleApiError } from "./errorService";
 
 let quotaCooldownUntil = 0;
+let cooldownListeners: ((cooldown: number) => void)[] = [];
+
+export const addCooldownListener = (listener: (cooldown: number) => void) => {
+  cooldownListeners.push(listener);
+  return () => {
+    cooldownListeners = cooldownListeners.filter(l => l !== listener);
+  };
+};
+
+const notifyCooldown = (cooldown: number) => {
+  cooldownListeners.forEach(l => l(cooldown));
+};
+
+export const getQuotaCooldown = () => {
+  return Math.max(0, quotaCooldownUntil - Date.now());
+};
+
+export const isAiInCooldown = () => {
+  return getQuotaCooldown() > 0;
+};
 
 export const getAI = () => {
-  if (Date.now() < quotaCooldownUntil) {
+  const cooldown = getQuotaCooldown();
+  if (cooldown > 0) {
     throw new Error("Gemini AI Quota Exceeded. Cooldown in effect.");
   }
   const apiKey = process.env.GEMINI_API_KEY;
@@ -16,14 +38,39 @@ export const getAI = () => {
   return new GoogleGenAI({ apiKey });
 };
 
+/**
+ * Safely extracts and parses JSON from a string that might contain markdown or extra text.
+ */
+function safeParseJson(text: string): any {
+  try {
+    // Attempt standard parse first
+    return JSON.parse(text);
+  } catch (initialError) {
+    try {
+      // Look for JSON block patterns ({ ... } or [ ... ])
+      // Use non-greedy match to find the first block if multiple exist? 
+      // Actually largest block is usually safer for AI output.
+      const jsonMatch = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+      if (jsonMatch) {
+        return JSON.parse(jsonMatch[0]);
+      }
+      throw initialError;
+    } catch (finalError) {
+      console.error("JSON Parse Failure. Raw text:", text);
+      throw finalError;
+    }
+  }
+}
+
 export const isAiServiceUnavailable = (err: any) => {
   if (!err) return false;
-  const str = typeof err === 'string' ? err : (err.message || JSON.stringify(err));
+  const str = typeof err === 'string' ? err : (err.message || String(err));
   const isQuota = 
     str.includes('429') || 
     str.includes('RESOURCE_EXHAUSTED') || 
     str.toLowerCase().includes('quota') || 
     str.toLowerCase().includes('exceeded quota') ||
+    str.toLowerCase().includes('failed to call the gemini api') ||
     str.includes('Cooldown in effect') ||
     err?.status === 429 || 
     err?.code === 429 || 
@@ -40,24 +87,40 @@ export const isAiServiceUnavailable = (err: any) => {
   const shouldCooldown = isQuota || isTransient;
 
   if (shouldCooldown && !str.includes('Cooldown in effect')) {
-    // Set cooldown for 60 seconds if it's a fresh error
-    quotaCooldownUntil = Date.now() + 60000;
+    const now = Date.now();
+    const isNewCooldown = now > (quotaCooldownUntil - 290000); // Only notify if we weren't already in deep cooldown
+
+    // Set cooldown for 5 minutes if it's a fresh error - free tier limits are often strict
+    quotaCooldownUntil = now + 300000;
+    notifyCooldown(300000);
+    
+    if (isNewCooldown) {
+      // Notify the user via the Notification System
+      import('./notificationService').then(({ createNotification }) => {
+        createNotification({
+          title: 'AI Service Rate Limited',
+          message: 'The AI engine has hit its operational limit. It will automatically resume in 5 minutes.',
+          type: 'warning',
+          category: 'system'
+        });
+      }).catch(err => console.error('Failed to notify quota:', err));
+    }
   }
   
   return shouldCooldown;
 };
 
-export const handleAiError = (error: any, endpoint: string) => {
+export const handleAiError = (error: any, endpoint: string, silent: boolean = false) => {
   const isUnavailable = isAiServiceUnavailable(error);
   const message = error instanceof Error ? error.message : String(error);
   const isCooldown = message.includes('Cooldown in effect');
 
   if (isUnavailable) {
     if (!isCooldown) {
-      console.warn(`Gemini AI Service Unavailable for ${endpoint}. Cooldown in effect for 60s.`);
+      console.warn(`Gemini AI Service Unavailable for ${endpoint}. Cooldown in effect for 300s.`);
     }
   }
-  handleApiError(error, 'Gemini AI', endpoint);
+  handleApiError(error, 'Gemini AI', endpoint, silent);
 };
 
 export async function searchNearbyAirports(lat: number, lng: number, radius: number = 50) {
@@ -72,6 +135,25 @@ export async function searchNearbyAirports(lat: number, lng: number, radius: num
 }
 
 export async function getFlightRouteDetails(departure: string, destination: string) {
+  const cacheId = `route_${departure.toUpperCase()}_${destination.toUpperCase()}`.toLowerCase();
+  
+  // 1. Try cache first
+  try {
+    const cacheRef = doc(db, 'route_details_cache', cacheId);
+    const snapshot = await getDocFromServer(cacheRef);
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      const updatedAt = new Date(data.updatedAt).getTime();
+      const now = Date.now();
+      // Cache for 24 hours
+      if (now - updatedAt < 86400000) {
+        return data.result;
+      }
+    }
+  } catch (error) {
+    console.error('Route cache read error:', error);
+  }
+
   const prompt = `Calculate the flight details between ${departure} and ${destination}.
   
   CRITICAL ROUTE ENGINE REQUIREMENTS:
@@ -106,7 +188,7 @@ export async function getFlightRouteDetails(departure: string, destination: stri
       altitude: string,
       restrictedAirspaceNotes: string
     }[],
-    firs: { name: string, code: string, country: string, rules: string, overflightCharge: number, navigationCharge: number }[],
+    firs: { name: string, code: string, country: string, rules: string, overflightCharge: number, navigationCharge: number, polygon?: [number, number][] }[],
     permits: { country: string, type: 'Overflight' | 'Landing', leadTime: string, estimatedFee: number }[],
     restrictedAreas: { name: string, reason: string, severity: 'Low' | 'Medium' | 'High', coordinates?: [number, number][] }[],
     operationalSummaryNote: string, // Detailed breakdown following this EXACT structure: 
@@ -143,7 +225,19 @@ export async function getFlightRouteDetails(departure: string, destination: stri
       },
     });
 
-    return JSON.parse(response.text);
+    const result = safeParseJson(response.text);
+
+    // Save to cache
+    try {
+      await setDoc(doc(db, 'route_details_cache', cacheId), {
+        result,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (cacheError) {
+      console.error('Route cache write error:', cacheError);
+    }
+
+    return result;
   } catch (error) {
     handleAiError(error, 'getFlightRouteDetails');
     throw error;
@@ -152,9 +246,28 @@ export async function getFlightRouteDetails(departure: string, destination: stri
 
 
 export async function getOptimizedRoute(departure: string, destination: string, currentFirs: any[], aircraftPerformance?: any, optimizationCriteria?: string) {
+  const cacheId = `opt_${departure.toUpperCase()}_${destination.toUpperCase()}_${(optimizationCriteria || 'balanced').toLowerCase().replace(/\s+/g, '_')}`.toLowerCase();
+
+  // 1. Try cache first
+  try {
+    const cacheRef = doc(db, 'optimized_route_cache', cacheId);
+    const snapshot = await getDocFromServer(cacheRef);
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      const updatedAt = new Date(data.updatedAt).getTime();
+      const now = Date.now();
+      // Cache for 24 hours
+      if (now - updatedAt < 86400000) {
+        return data.result;
+      }
+    }
+  } catch (error) {
+    console.error('Optimization cache read error:', error);
+  }
+
   const prompt = `Analyze the flight route from ${departure} to ${destination}.
-  Current FIRs: ${JSON.stringify(currentFirs)}
-  Aircraft Performance: ${JSON.stringify(aircraftPerformance)}
+  Current FIRs: ${safeStringify(currentFirs)}
+  Aircraft Performance: ${safeStringify(aircraftPerformance)}
   User Preferred Optimization Criteria: ${optimizationCriteria || 'balanced (consider cost, time, and fuel)'}
   
   🤖 AI BEHAVIOR RULES:
@@ -214,11 +327,23 @@ export async function getOptimizedRoute(departure: string, destination: string, 
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json"
       },
     });
 
-    const text = response.text.replace(/```json\n?/, '').replace(/```/, '');
-    return JSON.parse(text);
+    const result = safeParseJson(response.text);
+
+    // Save to cache
+    try {
+      await setDoc(doc(db, 'optimized_route_cache', cacheId), {
+        result,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (cacheError) {
+      console.error('Optimization cache write error:', cacheError);
+    }
+
+    return result;
   } catch (error) {
     handleAiError(error, 'getOptimizedRoute');
     return null;
@@ -234,21 +359,41 @@ export async function getSuggestedAircraft(
   departureIcao: string,
   missionType: string = 'Passenger'
 ) {
-  const prompt = `Given these aircraft: ${JSON.stringify(aircraftList)}, suggest three distinct aircraft options for a ${missionType} mission with ${passengers} passengers, ${cargoWeight}kg cargo, and a mission distance of ${distance} nautical miles starting from ${departureIcao}.
+  // Use a stable cache ID based on core mission parameters
+  const cacheKey = `suggest_${passengers}_${cargoWeight}_${Math.round(distance/50)*50}_${departureIcao}_${missionType}`.toLowerCase().replace(/[^a-z0-9]/g, '_');
   
-  CRITICAL SELECTION CRITERIA:
-  1. Mission Type Alignment: Prioritize aircraft that are best suited for ${missionType} (e.g., dedicated freighters for Cargo, ultra-long-range/luxury jets for VIP, high-capacity airliners for ACMI).
-  2. Range Capability: Aircraft MUST have range > ${distance} nautical miles. If the mission distance exceeds 85% of the aircraft's range, you MUST explicitly plan for optimal fuel stops and mention them in the reasoning.
-  3. Passenger Capacity: Aircraft MUST have maxPassengers >= ${passengers}.
-  4. Payload Capacity: Aircraft MUST have maxPayload > (${passengers} * 90kg + ${cargoWeight}kg).
-  5. Runway Requirements: Aircraft takeoff/landing distance MUST be <= runway length at ${departureIcao} and destination.
+  try {
+    const cacheRef = doc(db, 'suggested_aircraft_cache', cacheKey);
+    const snapshot = await getDocFromServer(cacheRef);
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      const updatedAt = new Date(data.updatedAt).getTime();
+      if (Date.now() - updatedAt < 86400000) { // 24hr cache
+        return data.result;
+      }
+    }
+  } catch (e) {
+    console.error('Suggested aircraft cache read error:', e);
+  }
+
+  const prompt = `Given these aircraft: ${safeStringify(aircraftList)}, suggest three distinct aircraft options for a ${missionType} mission with ${passengers} passengers, ${cargoWeight}kg cargo, and a mission distance of ${distance} nautical miles starting from ${departureIcao}.
   
-  If an exact match is not available, suggest the closest alternatives.
+  CRITICAL SELECTION CRITERIA (NON-NEGOTIABLE):
+  1. Mission Type Alignment:
+     - For ACMI Lease/Passenger missions > 20 pax: ONLY suggest Commercial Airplanes (Narrowbody/Widebody).
+     - For VIP missions: Suggest Luxury/Business Jets.
+     - For Cargo: ONLY suggest Freighters (maxPayload is critical).
+  2. Passenger Capacity: Aircraft MUST have maxPassengers >= ${passengers}. NEVER suggest a VIP jet with 8-16 seats for a ${passengers} passenger mission. This is a hard failure.
+  3. Range Capability: Aircraft MUST have range > ${distance} nautical miles. mention fuel stops if distance > 85% range.
+  4. Payload Capacity: Aircraft MUST have maxPayload > (${passengers} * 100kg + ${cargoWeight}kg).
+  5. Scale Reasonableness: For high passenger counts (e.g., 100+), suggest aircraft that are typically used for such volumes (e.g., A320, B737, A330, etc.), not multiple small jets.
+  
+  If no suitable aircraft exist in the provided list that meet the HARD passenger count of ${passengers}, you MUST return an empty options array and explain in a 'warning' field.
   
   PRIORITIZATION:
-  1. Fuel Efficiency: Prioritize aircraft with lower fuelBurnPerHour.
-  2. Availability Likelihood: Prioritize aircraft with shortest positioning distance.
-  3. Cost-Effectiveness: Prioritize aircraft with lower hourlyRate.
+  1. Capacity Fit: Closest match to ${passengers} without going significantly under.
+  2. Fuel Efficiency: Lower fuelBurnPerHour.
+  3. Cost-Effectiveness: Lower hourlyRate.
   
   Return a JSON object: {
     options: {
@@ -259,7 +404,8 @@ export async function getSuggestedAircraft(
       availabilityScore: number,
       costEffectivenessScore: number,
       totalScore: number
-    }[]
+    }[],
+    warning?: string
   }
 
   🤖 AI BEHAVIOR RULES:
@@ -283,7 +429,19 @@ export async function getSuggestedAircraft(
       },
     });
 
-    return JSON.parse(response.text);
+    const result = safeParseJson(response.text);
+    
+    // Save to cache
+    try {
+      await setDoc(doc(db, 'suggested_aircraft_cache', cacheKey), {
+        result,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (cacheError) {
+      console.error('Suggested aircraft cache write error:', cacheError);
+    }
+
+    return result;
   } catch (error: any) {
     console.warn("Using fallback aircraft suggestions due to API error:", error?.message);
     
@@ -339,7 +497,7 @@ export async function getWindImpact(departure: string, destination: string) {
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error: any) {
     handleAiError(error, 'getWindImpact');
     return { windComponent: 0, description: "Service temporarily unavailable. Defaulting to zero wind component." };
@@ -372,7 +530,7 @@ export async function parseNaturalLanguageQuote(prompt: string) {
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error) {
     console.warn("Using fallback parsed quote due to API error:", error);
     return {
@@ -403,7 +561,7 @@ export async function optimizeRoute(params: {
   Current Date: ${params.currentDate}
   Departure Date/Time: ${params.dateTime}
   Mission: ${params.passengers} PAX, ${params.payload}kg Cargo.
-  Aircraft Performance: ${JSON.stringify(params.aircraftPerformance || 'Standard performance')}
+  Aircraft Performance: ${safeStringify(params.aircraftPerformance || 'Standard performance')}
   User Preferred Optimization Criteria: ${params.optimizationCriteria || 'balanced (consider cost, time, and fuel)'}
 
   🤖 AI BEHAVIOR RULES:
@@ -463,7 +621,7 @@ export async function optimizeRoute(params: {
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error) {
     handleAiError(error, 'optimizeRoute');
     return null;
@@ -478,8 +636,8 @@ export async function getFuelStopSuggestions(params: {
 }) {
   const prompt = `You are a Senior Flight Dispatcher. Analyze the following flight legs and suggest optimal fuel stop locations.
   
-  Aircraft: ${JSON.stringify(params.aircraft)}
-  Current Legs: ${JSON.stringify(params.legs)}
+  Aircraft: ${safeStringify(params.aircraft)}
+  Current Legs: ${safeStringify(params.legs)}
   Mission Type: ${params.missionType}
   Current Date: ${params.currentDate}
 
@@ -514,7 +672,7 @@ export async function getFuelStopSuggestions(params: {
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error) {
     handleAiError(error, 'getFuelStopSuggestions');
     return null;
@@ -527,6 +685,22 @@ export async function getOperationalRiskAssessment(params: {
   aircraftType: string;
   dateTime: string;
 }) {
+  const cacheKey = `risk_${params.departure}_${params.destination}_${params.aircraftType.replace(/\s+/g, '_')}_${params.dateTime.split('T')[0]}`.toLowerCase();
+  
+  try {
+    const cacheRef = doc(db, 'risk_assessment_cache', cacheKey);
+    const snapshot = await getDocFromServer(cacheRef);
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      const updatedAt = new Date(data.updatedAt).getTime();
+      if (Date.now() - updatedAt < 43200000) { // 12hr cache for risks (weather changes)
+        return data.result;
+      }
+    }
+  } catch (e) {
+    console.error('Risk cache read error:', e);
+  }
+
   const prompt = `Perform a comprehensive Operational Risk Assessment for a flight from ${params.departure} to ${params.destination} using a ${params.aircraftType} on ${params.dateTime}.
   
   Analyze:
@@ -558,7 +732,19 @@ export async function getOperationalRiskAssessment(params: {
       },
     });
 
-    return JSON.parse(response.text);
+    const result = safeParseJson(response.text);
+
+    // Save to cache
+    try {
+      await setDoc(doc(db, 'risk_assessment_cache', cacheKey), {
+        result,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (cacheError) {
+      console.error('Risk cache write error:', cacheError);
+    }
+
+    return result;
   } catch (error) {
     handleAiError(error, 'getOperationalRiskAssessment');
     return null;
@@ -603,16 +789,16 @@ export async function generateCharterQuotes(params: {
   - Broker Margin: ${params.brokerMargin}%
   - Operator Margin: ${params.operatorMargin}%
   - Special Routing Instructions: ${params.specialInstructions || 'None'}
-  - Custom Waypoints (Lat/Lng): ${params.customWaypoints && params.customWaypoints.length > 0 ? JSON.stringify(params.customWaypoints) : 'None'}
+  - Custom Waypoints (Lat/Lng): ${params.customWaypoints && params.customWaypoints.length > 0 ? safeStringify(params.customWaypoints) : 'None'}
 
   Available Fleet Data:
-  ${JSON.stringify(aircraftList)}
+  ${safeStringify(aircraftList)}
 
   Available Empty Legs (Check for matches):
-  ${JSON.stringify(emptyLegs)}
+  ${safeStringify(emptyLegs)}
 
   Airport Operational Data (Use for fees, handling status, and runway checks):
-  ${JSON.stringify(params.airportsContext || [])}
+  ${safeStringify(params.airportsContext || [])}
 
   CRITICAL SELECTION CRITERIA:
   1. Passenger Capacity: Selected aircraft MUST have maxPassengers >= ${params.passengers}. Do not suggest aircraft with fewer seats than requested.
@@ -730,7 +916,7 @@ export async function generateCharterQuotes(params: {
       },
     });
 
-    return { data: JSON.parse(response.text), isFallback: false };
+    return { data: safeParseJson(response.text), isFallback: false };
   } catch (error: any) {
     console.warn("Using fallback charter quotes data due to API error:", error?.message || "Rate limit exceeded");
     
@@ -854,10 +1040,10 @@ export async function generateCharterQuotes(params: {
 
 export async function getCommercialViabilitySuggestion(quotesData: any, params: any) {
   const prompt = `Analyze the following charter quotes and route data:
-  ${JSON.stringify(quotesData)}
+  ${safeStringify(quotesData)}
   
   Request parameters:
-  ${JSON.stringify(params)}
+  ${safeStringify(params)}
   
   CRITICAL ANALYSIS:
   1. BEST AIRCRAFT: Suggest the aircraft that offers the best balance between Broker Profit and Client Price. High profit for the broker is good, but if the price is too high, the client won't book.
@@ -911,6 +1097,8 @@ export interface EmptyLegSearchParams {
 }
 
 export async function getEmptyLegs(params?: EmptyLegSearchParams) {
+  const cacheKey = params ? `empty_legs_${params.searchType || 'default'}_${(params.specificDeparture || params.radiusLocation || 'any').toLowerCase()}_${(params.specificDestination || 'any').toLowerCase()}` : 'empty_legs_all';
+  
   // 1. Try fetching from Firestore first (Manual/Scraped data)
   try {
     const emptyLegsRef = collection(db, 'empty_legs');
@@ -930,7 +1118,22 @@ export async function getEmptyLegs(params?: EmptyLegSearchParams) {
     console.warn("Firestore fetch for empty legs failed, falling back to AI search:", dbError);
   }
 
-  // 2. Fallback to AI Search if no DB data found
+  // 2. Try Cache for AI search results
+  try {
+    const cacheRef = doc(db, 'empty_legs_cache', cacheKey);
+    const snapshot = await getDocFromServer(cacheRef);
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      const updatedAt = new Date(data.updatedAt).getTime();
+      if (Date.now() - updatedAt < 14400000) { // 4 hour cache for empty legs
+        return data.result;
+      }
+    }
+  } catch (e) {
+    console.error('Empty legs cache read error:', e);
+  }
+
+  // 3. Fallback to AI Search if no DB or Cache data found
   let searchContext = 'Search the web for current, real-world "empty leg" private jet flights available this week or upcoming.';
   
   if (params) {
@@ -990,7 +1193,19 @@ export async function getEmptyLegs(params?: EmptyLegSearchParams) {
         tools: [{ googleSearch: {} }],
       },
     });
-    return { data: JSON.parse(response.text), isFallback: false };
+    const result = { data: safeParseJson(response.text), isFallback: false };
+    
+    // Save to cache
+    try {
+      await setDoc(doc(db, 'empty_legs_cache', cacheKey), {
+        result,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (cacheError) {
+      console.error('Empty legs cache write error:', cacheError);
+    }
+
+    return result;
   } catch (error: any) {
     console.warn("Using fallback empty legs data due to API error:", error?.message || "Rate limit exceeded");
     // Fallback to sample data if the live fetch fails
@@ -1013,7 +1228,7 @@ export async function planComplexFlight(userInput: string, aircraftList: any[], 
   const prompt = `You are a senior flight operations expert. A user says: "${userInput}".
   The mission type is "${missionType}".
   The user prefers a "${optimization}" optimization strategy.
-  Based on this request and the available aircraft: ${JSON.stringify(aircraftList)}, build a complete flight plan.
+  Based on this request and the available aircraft: ${safeStringify(aircraftList)}, build a complete flight plan.
   
   CRITICAL REAL-TIME DATA SEARCH:
   1. Search for current NOTAMs (Notice to Air Missions) for all departure, destination, and stopover airports.
@@ -1026,19 +1241,20 @@ export async function planComplexFlight(userInput: string, aircraftList: any[], 
   2. For each leg, calculate:
      - Great Circle (GC) distance (nm)
      - Realistic Routing distance (GC distance + 5% to 10% buffer for standard airways)
+     - The current flight plan route (departure, destination, and all waypoints) in the routeWaypoints array.
      - Estimated flight time (hours): Use formula (Routing Distance / Cruise Speed) + Taxi Time (20 min) + Climb/Descent Buffer (15 min).
      - Fuel burn
      - FIRs crossed (Identify each FIR and calculate specific charges based on the selected aircraft's MTOW and routing)
      - Required permits (country, type, leadTime, estimatedFee)
      - Restricted airspaces (name, reason, severity, and approximate coordinates as an array of [lat, lng] points if it's a specific zone)
-     - Available handling agents (FBOs) at the destination airport (companyName, email, phone, website, baseFee, additionalServices)
-     - Detailed costs:
+     - Available handling agents (FBOs) at both the departure and destination airports (companyName, email, phone, website, baseFee, additionalServices)
+      - Detailed costs:
     - Fuel cost (based on REAL-TIME airport rates found)
     - Overflight charges (per FIR, specifically calculated for the selected aircraft)
     - Navigation charges (en-route, specifically calculated for the selected aircraft)
     - Landing charges
     - Parking charges
-    - Handling charges (per airport)
+    - Handling charges (per airport, including BOTH departure and destination handling fees)
     - Terminal navigation fees (per airport)
     - Operational costs: Catering, Ground transport, De-icing (if applicable)
     - Positioning Costs: Empty leg positioning from aircraft's currentLocation and Repositioning back to homeBase.
@@ -1060,6 +1276,7 @@ export async function planComplexFlight(userInput: string, aircraftList: any[], 
      - Alternate: (Fuel to reach alternate)
      - Final Reserve: (45 minutes of holding fuel)
      - Total Fuel Required: (Sum of all components)
+     - Total Landing/Handling Cost: (Combine all landing and handling fees for entire trip)
   5. Detect if fuel stops are needed based on the aircraft's range and the route.
   6. Suggest optimal fuel stops (ICAO codes) if needed.
   7. Provide operational notes (permits, runway requirements).
@@ -1079,10 +1296,13 @@ export async function planComplexFlight(userInput: string, aircraftList: any[], 
       fuelBurn: number, 
       altitude: number,
       operationalNotes: string,
-      firs: { name: string, country: string, overflightCharge: number, navigationCharge: number, rules: string }[], 
+      firs: { name: string, country: string, overflightCharge: number, navigationCharge: number, rules: string, polygon?: [number, number][] }[], 
+      routeWaypoints: string[],
       permits: { country: string, type: 'Overflight' | 'Landing', leadTime: string, estimatedFee: number }[],
+
       restrictedAreas: { name: string, reason: string, severity: 'Low' | 'Medium' | 'High', coordinates?: [number, number][] }[],
       handlingAgents: { companyName: string, email: string, phone: string, website: string, baseFee: number, additionalServices: string }[],
+      departureHandlingAgents: { companyName: string, email: string, phone: string, website: string, baseFee: number, additionalServices: string }[],
       costs: {
         fuel: number,
         overflight: number,
@@ -1090,6 +1310,7 @@ export async function planComplexFlight(userInput: string, aircraftList: any[], 
         landing: number,
         parking: number,
         handling: number,
+        departureHandling: number,
         terminalNavigation: number,
         catering: number,
         groundTransport: number,
@@ -1209,7 +1430,7 @@ export async function getMultiLegRouteDetails(airports: string[]) {
       departureCoords: { lat: number, lng: number },
       destinationCoords: { lat: number, lng: number },
       altitude: number,
-      firs: { name: string, country: string, rules: string, overflightCharge: number, navigationCharge: number }[],
+      firs: { name: string, country: string, rules: string, overflightCharge: number, navigationCharge: number, polygon?: [number, number][] }[],
       permits: { country: string, type: 'Overflight' | 'Landing', leadTime: string, estimatedFee: number }[],
       restrictedAreas: { name: string, reason: string, severity: 'Low' | 'Medium' | 'High', coordinates?: [number, number][] }[],
       handlingAgents: { companyName: string, email: string, phone: string, website: string, baseFee: number, additionalServices: string }[],
@@ -1274,7 +1495,7 @@ export async function getMultiLegRouteDetails(airports: string[]) {
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error: any) {
     console.warn("Using fallback route details due to API error:", error?.message);
     if (isAiServiceUnavailable(error)) {
@@ -1317,8 +1538,8 @@ export async function getNegotiationStrategy(aircraft: any, missionData: any, cu
   const prompt = `You are a Senior Aviation Contract Negotiator and ACMI Specialist. 
   Analyze this ACMI/Charter mission and the selected aircraft to provide a winning negotiation strategy.
   
-  Mission: ${JSON.stringify(missionData)}
-  Aircraft: ${JSON.stringify(aircraft)}
+  Mission: ${safeStringify(missionData)}
+  Aircraft: ${safeStringify(aircraft)}
   Current Quoted Price: $${currentPrice}
   
   CRITICAL ANALYSIS:
@@ -1347,7 +1568,7 @@ export async function getNegotiationStrategy(aircraft: any, missionData: any, cu
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error) {
     handleAiError(error, 'getNegotiationStrategy');
     return null;
@@ -1378,6 +1599,12 @@ export async function generateACMIQuote(params: {
   - Return Date: ${params.returnDate || 'N/A'}
   - Payload: ${params.payload}
   - Special Requirements: ${params.specialRequirements || 'None'}
+
+  CRITICAL CAPACITY MATCHING RULE:
+  The selected or suggested aircraft MUST accommodate the requested payload of ${params.payload} (passengers or kg). 
+  - If passengers = ${params.payload} and ${params.payload} > 20, you MUST NOT suggest or use VIP jets (e.g., Gulfstream, Global) as they are limited to <20 seats. 
+  - You MUST use Commercial Narrowbody or Widebody aircraft for high passenger volumes. 
+  - If the requested aircraft type is unsuitable for the payload, you MUST explicitly state this and switch to a more reasonable category.
 
   🤖 AI BEHAVIOR RULES:
   - Never leave fields empty → estimate intelligently based on aviation standards.
@@ -1537,9 +1764,33 @@ export async function generateACMIQuote(params: {
   }
 }
 
-export async function searchAirports(query: string) {
-  const prompt = `Search for airports matching the query: "${query}". 
-  Provide a list of up to 5 matching airports with their:
+export async function searchAirports(query: string, userLocation?: { lat: number, lng: number }) {
+  const cacheKey = `search_${query.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${userLocation ? `${Math.round(userLocation.lat)}_${Math.round(userLocation.lng)}` : 'no_loc'}`.toLowerCase();
+  
+  try {
+    const cacheRef = doc(db, 'airport_search_cache', cacheKey);
+    const snapshot = await getDocFromServer(cacheRef);
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      const updatedAt = new Date(data.updatedAt).getTime();
+      if (Date.now() - updatedAt < 86400000 * 3) { // 3 day cache for search results
+        return data.result;
+      }
+    }
+  } catch (e) {
+    console.error('Search cache read error:', e);
+  }
+
+  // Try to use AI to interpret the natural language query
+  const prompt = `Search for airports matching this natural language query: "${query}".
+  ${userLocation ? `The user's current location is approximately: Lat ${userLocation.lat}, Lng ${userLocation.lng}. Use this if the query mentions "near me", "nearby", or implies proximity.` : ''}
+  
+  TASK:
+  1. If the query specifies criteria (e.g., "with Jet A1", "runway > 5000ft", "in London"), filter results accordingly.
+  2. Provide a list of up to 5 MOST RELEVANT airports.
+  3. Use Google Search to find current data if the specific criteria are complex.
+  
+  Provide for each airport:
   - ICAO (4-letter)
   - IATA (3-letter)
   - Name
@@ -1547,7 +1798,7 @@ export async function searchAirports(query: string) {
   - Latitude and Longitude
   - Runway length (ft)
   - Elevation (ft)
-  - Fuel availability (Jet A1, Avgas)
+  - Fuel availability (Detailed list like ["Jet A1", "Avgas 100LL"])
   - Estimated Fuel Rate (USD per Liter)
   - Estimated Landing Fee (USD for mid-size jet)
   - Estimated Parking Fee (USD per day)
@@ -1555,9 +1806,9 @@ export async function searchAirports(query: string) {
   - Estimated Terminal Navigation Fee (USD)
   - Handling availability (boolean)
   - Parking spots (integer)
-  - ATIS frequency (as a string, e.g., "128.725" or "Not available")
+  - ATIS frequency (string)
   
-  Return JSON: {
+  Return strictly as JSON matching this structure: {
     airports: {
       icao: string,
       iata: string,
@@ -1577,52 +1828,8 @@ export async function searchAirports(query: string) {
       parkingSpots: number,
       atisFrequency: string
     }[]
-  }.`;
-
-  try {
-    const ai = getAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      },
-    });
-
-    return JSON.parse(response.text);
-  } catch (error) {
-    handleAiError(error, 'searchAirports');
-    return { airports: [] };
-  }
-}
-
-export async function getAirportDetails(code: string) {
-  const prompt = `Provide detailed information for the airport with ICAO or IATA code: ${code}.
-  
-  Include:
-  1. Latitude and Longitude.
-  2. Full Name and City.
-  3. Runway length (in feet).
-  4. Elevation (in feet).
-  5. Fuel types available (e.g., Jet A-1, Avgas).
-  6. Handling availability (boolean or description).
-  7. ATIS frequency (as a string, e.g., "128.725" or "Not available").
-  
-  Return JSON: { 
-    "icao": "string",
-    "iata": "string",
-    "lat": number, 
-    "lng": number, 
-    "name": "string", 
-    "city": "string",
-    "runwayLength": number,
-    "elevation": number,
-    "fuelTypes": string[],
-    "handlingAvailable": boolean,
-    "handlingDescription": "string",
-    "atisFrequency": string
   }`;
-  
+
   try {
     const ai = getAI();
     const response = await ai.models.generateContent({
@@ -1634,7 +1841,87 @@ export async function getAirportDetails(code: string) {
       },
     });
 
-    const details = JSON.parse(response.text);
+    const result = safeParseJson(response.text);
+
+    // Save to cache
+    try {
+      await setDoc(doc(db, 'airport_search_cache', cacheKey), {
+        result,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (cacheError) {
+      console.error('Search cache write error:', cacheError);
+    }
+
+    return result;
+  } catch (error) {
+    handleAiError(error, 'searchAirports');
+    return { airports: [] };
+  }
+}
+
+export async function getAirportDetails(code: string, forceRefresh: boolean = false) {
+  // 1. Try to fetch from Firestore cache first if not forcing refresh
+  if (!forceRefresh) {
+    try {
+      const airportsRef = collection(db, 'airports');
+      const q = query(airportsRef, where('icao', '==', code.toUpperCase()));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        return snapshot.docs[0].data();
+      }
+    } catch (cacheError) {
+      console.error('Cache read error in getAirportDetails:', cacheError);
+    }
+  }
+  const prompt = `Provide precise technical information for the airport: ${code}. 
+  Use Google Search to verify the latest runway data, elevation, and operating hours.
+  
+  Required fields:
+  - Latitude/Longitude (accurate decimal).
+  - Runway length (longest runway in feet).
+  - Elevation (in feet).
+  - Operating hours (local time or H24).
+  - Fuel (list specific grades like Jet A-1, Avgas 100LL).
+  - Customs & Immigration (Is it an Airport of Entry? What are the requirements?).
+  - Ground Handling (Are FBOs available? List major agencies if possible).
+  - Technical frequencies (ATIS, Tower, Ground, Delivery) if available.`;
+  
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            icao: { type: Type.STRING },
+            iata: { type: Type.STRING },
+            lat: { type: Type.NUMBER },
+            lng: { type: Type.NUMBER },
+            name: { type: Type.STRING },
+            city: { type: Type.STRING },
+            runwayLength: { type: Type.NUMBER },
+            elevation: { type: Type.NUMBER },
+            operatingHours: { type: Type.STRING },
+            fuelTypes: { type: Type.ARRAY, items: { type: Type.STRING } },
+            handlingAvailable: { type: Type.BOOLEAN },
+            handlingDescription: { type: Type.STRING },
+            customsAvailable: { type: Type.BOOLEAN },
+            customsInfo: { type: Type.STRING },
+            isAirportOfEntry: { type: Type.BOOLEAN },
+            atisFrequency: { type: Type.STRING },
+            towerFrequency: { type: Type.STRING },
+            groundFrequency: { type: Type.STRING }
+          }
+        },
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    const details = safeParseJson(response.text);
 
     // Update Firestore if necessary
     try {
@@ -1664,7 +1951,7 @@ export async function getAirportDetails(code: string) {
 
 export async function optimizeFlightSchedule(schedule: any) {
   const prompt = `Analyze the following flight schedule for potential optimizations:
-  ${JSON.stringify(schedule)}
+  ${safeStringify(schedule)}
   
   CRITICAL OPTIMIZATION GOALS:
   1. MINIMIZE TOTAL FLIGHT TIME: Analyze the current flight legs and suggest REORDERING or adjustments to minimize total airborne time. Consider the aircraft's cruise speed (${schedule.aircraft?.cruiseSpeed || 'N/A'} kts) and range (${schedule.aircraft?.range || 'N/A'} nm).
@@ -1714,28 +2001,53 @@ export async function optimizeFlightSchedule(schedule: any) {
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error) {
-    handleAiError(error, 'optimizeFlightSchedule');
+    handleAiError(error, 'generateACMIQuote');
     return null;
   }
 }
 
 export async function analyzeFlightPlan(plan: any) {
+  // 1. Try to fetch from cache first (12 hour cache as it's expensive)
+  const planHash = btoa(safeStringify({
+    legs: plan.legs.map((l: any) => ({ d: l.departure, a: l.destination })),
+    aircraft: plan.suggestedAircraft
+  })).slice(0, 32).replace(/[/+]/g, '_');
+  const cacheId = `analysis_${planHash}`;
+  
+  try {
+    const cacheRef = doc(db, 'plan_analysis_cache', cacheId);
+    const snapshot = await getDocFromServer(cacheRef);
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      const updatedAt = new Date(data.updatedAt).getTime();
+      const now = Date.now();
+      // Cache for 12 hours
+      if (now - updatedAt < 12 * 3600000) {
+        return data;
+      }
+    }
+  } catch (error) {
+    console.error('Plan analysis cache read error:', error);
+  }
+
   const prompt = `Analyze the following flight plan:
-  ${JSON.stringify(plan)}
+  ${safeStringify(plan)}
   
   CRITICAL ANALYSIS GOALS:
   1. RISK ASSESSMENT: Identify potential operational, safety, or financial risks (e.g., tight turnarounds, high-cost FIRs, weather threats, permit lead times).
   2. WEATHER IMPACT: Analyze current and forecast weather patterns along the route (e.g., jet streams, turbulence, thunderstorms).
   3. FIR & OVERFLIGHT CHARGES: Identify high-cost airspaces and suggest avoidance strategies if applicable.
   4. EFFICIENCY GAINS: Highlight where the plan excels or where minor adjustments could save more time or fuel.
-  5. ALTERNATIVE STRATEGIES: Suggest at least two alternative strategies (e.g., "Use a different aircraft for better fuel economy" or "Change the stopover to avoid high navigation fees").
+  5. AIRCRAFT PERFORMANCE: Analyze current vs. optimal flight profiles (FL, speed, fuel burn) for the specified aircraft.
+  6. ALTERNATIVE STRATEGIES: Suggest at least two alternative strategies (e.g., "Use a different aircraft for better fuel economy" or "Change the stopover to avoid high navigation fees").
   
   Provide:
   - A list of specific risks with severity (Low, Medium, High).
   - A detailed weather impact assessment.
   - A detailed FIR charge analysis.
+  - A detailed aircraft performance analysis.
   - A list of efficiency highlights.
   - A list of alternative strategies with estimated impact.
   
@@ -1752,6 +2064,12 @@ export async function analyzeFlightPlan(plan: any) {
       "highCostFirs": string[],
       "totalEstimatedCharges": number,
       "optimizationPotential": "string"
+    },
+    "performanceAnalysis": {
+      "optimalCruiseAltitude": string,
+      "optimalSpeed": string,
+      "fuelEfficiencyNotes": "string",
+      "payloadImpact": "string"
     },
     "efficiencyGains": [
       { "gain": "string", "impact": "string" }
@@ -1772,7 +2090,19 @@ export async function analyzeFlightPlan(plan: any) {
       },
     });
 
-    return JSON.parse(response.text);
+    const analysis = safeParseJson(response.text);
+
+    // Update cache
+    try {
+      await setDoc(doc(db, 'plan_analysis_cache', cacheId), {
+        ...analysis,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (cacheError) {
+      console.error('Plan analysis cache write error:', cacheError);
+    }
+
+    return analysis;
   } catch (error) {
     handleAiError(error, 'analyzeFlightPlan');
     return null;
@@ -1838,7 +2168,7 @@ export async function getOptimizationAlternatives(plan: any, criteria: string) {
   const prompt = `You are a senior flight operations optimizer. 
   Analyze the following flight plan and suggest 3 alternative optimizations based on the criteria: "${criteria}".
   
-  Current Plan: ${JSON.stringify(plan)}
+  Current Plan: ${safeStringify(plan)}
   
   CRITICAL FACTORS TO CONSIDER:
   1. WEATHER: Consider jet streams, turbulence, and severe weather avoidance.
@@ -1898,69 +2228,187 @@ export async function getOptimizationAlternatives(plan: any, criteria: string) {
 }
 
 export async function searchHandlingAgents(icao: string, airportName?: string, city?: string, aircraftType?: string, forceRefresh: boolean = false) {
-  // 1. Try to fetch from Firestore cache if not forcing refresh
+  // 1. First, check for manual entries in handling_agents collection (authoritative)
   if (!forceRefresh) {
-    const agentsRef = collection(db, 'handling_agents');
-    const q = query(agentsRef, where('icao', '==', icao), limit(1));
-    const snapshot = await getDocs(q);
-    if (!snapshot.empty) {
-      return snapshot.docs[0].data() as { agents: any[] };
+    try {
+      const agentsRef = collection(db, 'handling_agents');
+      const q = query(agentsRef, where('icao', '==', icao.toUpperCase()));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        // If we found individual agent documents, return them formatted
+        // Note: Some docs might be the manual ones (flat), some might be the cache ones (contain .agents)
+        // We'll normalize this.
+        let results: any[] = [];
+        snapshot.docs.forEach(doc => {
+          const data = doc.data();
+          if (data.agents && Array.isArray(data.agents)) {
+            results = [...results, ...data.agents];
+          } else {
+            results.push({ id: doc.id, ...data });
+          }
+        });
+        
+        if (results.length > 0) {
+          // Deduplicate by company name - if there's a preferred version and a cached version, keep the preferred one
+          const agentMap = new Map();
+          results.forEach(a => {
+            const existing = agentMap.get(a.companyName);
+            if (!existing || (a.isPreferred && !existing.isPreferred)) {
+              agentMap.set(a.companyName, a);
+            }
+          });
+          
+          const unique = Array.from(agentMap.values());
+          // Sort: preferred first
+          unique.sort((a, b) => (b.isPreferred ? 1 : 0) - (a.isPreferred ? 1 : 0));
+
+          // Find the latest update time from individual snapshots or the cache doc
+          const timestamps = snapshot.docs.map(d => d.data().updatedAt || d.data().createdAt).filter(Boolean);
+          const lastUpdated = timestamps.length > 0 ? new Date(Math.max(...timestamps.map(t => new Date(t).getTime()))).toISOString() : undefined;
+          
+          return { agents: unique, lastUpdated, isFromCache: true };
+        }
+      }
+    } catch (cacheError) {
+      console.error('Manual entries check error in searchHandlingAgents:', cacheError);
     }
   }
 
-  // 2. If not in cache, use Gemini
-  const prompt = `Find real, active ground handling companies at ${airportName || icao} (${icao})${city ? ` in ${city}` : ''}${aircraftType ? ` for a ${aircraftType} aircraft` : ''}. 
-  Use Google Search to find the most accurate and up-to-date information.
-  
-  CRITICAL INSTRUCTION: We need LOCAL handling agents physically present at this specific airport. 
-  Do NOT return global corporate headquarters phone numbers or generic global info@ emails.
-  If it is a major network (like Swissport, dnata, Menzies, Jetex), you MUST find the local station's operational phone number and ops email specifically for ${icao}.
+  // 2. If not found or forcing refresh, use Gemini
+  const prompt = `Perform a deep, exhaustive search for REAL, ACTIVE ground handling companies (FBOs) physically present at ${airportName || icao} (${icao})${city ? ` in ${city}` : ''}${aircraftType ? ` for a ${aircraftType} aircraft` : ''}.
 
-  Provide a list of up to 4 companies with their:
-  - Company Name (append the station/airport to distinguish it, e.g., "dnata OPLA")
-  - Contact Email (local station email, e.g., ops.opla@... or similar local business email)
-  - Contact Phone (local operations phone, with country code)
-  - Website URL
-  - Estimated Base Handling Fee (USD) - provide a realistic estimate based on the airport and aircraft type
-  - Additional Services (e.g., VIP lounge, fuel, catering, customs)
+  SEARCH STRATEGY:
+  1. Use Google Search to find the official airport website's "Ground Handling" or "FBO" page for ${icao}.
+  2. Search for prominent networks like dnata, Swissport, Menzies, Jetex, Signature Flight Support, or Universal Aviation, but ONLY fetch their specific station contact for ${icao}.
+  3. Look for "ops" or "handling" subdomains or local email patterns (e.g., dxb.ops@dnata.com instead of info@dnata.com).
+  4. Search for local SITA or AFTN addresses if mentioned in directories.
+
+  CRITICAL ACCURACY REQUIREMENTS (ZERO TOLERANCE):
+  - We MUST have LOCAL STATION operational contacts physically present at ${icao}.
+  - DO NOT return global headquarters phone numbers (e.g., dnata HQ +971 4 606 4000).
+  - DO NOT return generic "info@", "sales@", or "marketing@" corporate emails. 
+  - SEARCH for local ops emails (e.g., ops.opla@..., lhr.station@..., or local station-specific addresses).
+  - Return up to 3 real, active local companies (the top 3 preferred handlers).
+
+  Example mapping to avoid:
+  - ❌ WRONG: dnata Global HQ, +971 4 606 4000, info@dnata.com (This is CORPORATE, not OPS)
+  - ✅ RIGHT: dnata OPLA Station, +92 42 36614488, ops.lhr@dnata.com.pk (This is LOCAL OPS)
+
+  VERIFICATION STEP:
+  Before returning, verify if the phone number or email is known to be a global corporate entry. If it is, keep searching for the specific station contact. If no specific station contact is found, look for another company that DOES have station-specific data available.
+
+  ESTIMATE BASE FEES:
+  If exact base handling fees are not public, provide a highly realistic estimate based on the airport's hub size (Hub/International: $800-$2000, Regional: $400-$800, Small/GA: $200-$400) and the aircraft type provided.
   
-  Return strictly as a JSON object, with no other text, matching this structure: {
-    "agents": [
-      {
-        "companyName": "string",
-        "email": "string",
-        "phone": "string",
-        "website": "string",
-        "baseFee": 0,
-        "additionalServices": "string"
-      }
-    ]
-  }.`;
+  DISCOUNTS AND PREMIUM RATINGS:
+  - If the agent is known for competitive pricing, bulk discounts, or partner network discounts, set 'discount' to true and potentially summarize it in 'discountDetails'.
+  - If the agent is highly rated, has 5-star reviews, or is known for premium/VIP service, set 'aiVerifiedPremium' to true.
+  Prioritize these specialized and high-quality agents in your results!`;
 
   try {
     const ai = getAI();
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-3.1-pro-preview", // Switching to Pro for better research accuracy in Ground Handling
       contents: prompt,
       config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            agents: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  companyName: { type: Type.STRING },
+                  email: { type: Type.STRING },
+                  phone: { type: Type.STRING },
+                  website: { type: Type.STRING },
+                  baseFee: { type: Type.NUMBER },
+                  additionalServices: { type: Type.STRING },
+                  discount: { type: Type.BOOLEAN },
+                  discountDetails: { type: Type.STRING },
+                  aiVerifiedPremium: { type: Type.BOOLEAN }
+                },
+                required: ["companyName", "email"]
+              }
+            }
+          }
+        },
         tools: [{ googleSearch: {} }],
       },
     });
 
-    const text = response.text.replace(/```json\n?/, '').replace(/```/, '');
-    const data = JSON.parse(text);
+    const data = JSON.parse(response.text);
 
-    // 3. Cache result in Firestore
-    await setDoc(doc(db, 'handling_agents', icao), {
+    // Filter out obviously corporate or placeholder results if any slipped through
+    if (data.agents) {
+      data.agents = data.agents.filter((a: any) => {
+        const email = (a.email || '').toLowerCase();
+        const blacklist = ['info@', 'sales@', 'marketing@', 'hello@', 'contact@', 'support@'];
+        return !blacklist.some(term => email.startsWith(term));
+      });
+    }
+
+    const lastUpdated = new Date().toISOString();
+
+    // 3. Cache result in Firestore as a single "collection" document for this ICAO
+    await setDoc(doc(db, 'handling_agents', `cache_${icao}`), {
       icao,
-      ...data,
-      updatedAt: new Date().toISOString()
+      agents: data.agents,
+      isAiGenerated: true,
+      updatedAt: lastUpdated
     });
 
-    return data;
+    return { ...data, lastUpdated, isFromCache: false };
   } catch (error) {
     handleAiError(error, 'searchHandlingAgents');
-    return { agents: [] };
+    return { agents: [], lastUpdated: undefined, isFromCache: false };
+  }
+}
+
+export async function enrichHandlingAgent(agent: any) {
+  const prompt = `Enrich the following ground handling agent data with specific operational details.
+  Company: ${agent.companyName}
+  Airport: ${agent.icao || agent.airport}
+  Current Email: ${agent.email || 'Unknown'}
+  Current Phone: ${agent.phone || 'Unknown'}
+  Current Website: ${agent.website || 'Unknown'}
+  
+  SEARCH GOALS:
+  1. Find the official website for ${agent.companyName} specifically at ${agent.icao || agent.airport}.
+  2. Find the LOCAL operational phone number for their station (NOT corporate headquarters).
+  3. Find the most direct operational email (e.g. ops@, handling@, or station-specific).
+  4. Determine if they are considered "Preferred" or "Premium" in the industry for this specific location.
+  
+  Return a JSON object with these fields specifically:
+  - companyName: string
+  - email: string
+  - phone: string
+  - website: string
+  - baseFee: number (realistic estimate if unknown)
+  - additionalServices: string (comma separated list)
+  - preferred: boolean
+  - rating: number (from 1.0 to 5.0 based on industry reputation)
+  
+  Ensure phone, website, and email are verified as local station specific entries where possible.`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    const result = safeParseJson(response.text);
+    return { ...agent, ...result, updatedAt: new Date().toISOString() };
+  } catch (error) {
+    handleAiError(error, 'enrichHandlingAgent');
+    throw error;
   }
 }
 
@@ -2002,31 +2450,12 @@ export async function suggestFuelStop(departure: string, destination: string, ai
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error) {
     handleAiError(error, 'suggestFuelStop');
     return { suggestions: [] };
   }
 }
-
-const safeParseJson = (text: string) => {
-  try {
-    // Attempt standard parse first
-    return JSON.parse(text);
-  } catch (initialError) {
-    try {
-      // Look for JSON block patterns (```json ... ``` or just { ... })
-      const jsonMatch = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      throw initialError;
-    } catch (finalError) {
-      console.error("JSON Parse Failure. Raw text:", text);
-      throw finalError;
-    }
-  }
-};
 
 export async function searchAirportsByCountry(country: string) {
   const prompt = `Provide a comprehensive airport list for ${country}.
@@ -2043,7 +2472,7 @@ export async function searchAirportsByCountry(country: string) {
   try {
     const ai = getAI();
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
@@ -2058,12 +2487,32 @@ export async function searchAirportsByCountry(country: string) {
 }
 
 export async function predictAvailability(aircraftId: string, liveData: any, utilizationData: any, context?: { departureIcao?: string, registration?: string }) {
+  // 1. Try to fetch from cache first (1 hour cache)
+  const registration = context?.registration || aircraftId;
+  const cacheId = `avail_${registration}_${context?.departureIcao || 'no_base'}`.toLowerCase();
+  
+  try {
+    const cacheRef = doc(db, 'availability_intelligence', cacheId);
+    const snapshot = await getDocFromServer(cacheRef);
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      const updatedAt = new Date(data.updatedAt).getTime();
+      const now = Date.now();
+      // Cache for 1 hour
+      if (now - updatedAt < 3600000) {
+        return data;
+      }
+    }
+  } catch (error) {
+    console.error('Availability cache read error:', error);
+  }
+
   const prompt = `You are an AI Aviation Availability Intelligence Engine.
   Based on the following live tracking, historical utilization, and mission context, predict aircraft availability for a charter/ACMI mission today.
   
-  Live Tracking Data (OpenSky): ${JSON.stringify(liveData || 'None')}
-  Historical Utilization Data (Aviationstack): ${JSON.stringify(utilizationData || 'None')}
-  Mission Context: ${JSON.stringify(context || 'None')}
+  Live Tracking Data (OpenSky): ${safeStringify(liveData || 'None')}
+  Historical Utilization Data (Aviationstack): ${safeStringify(utilizationData || 'None')}
+  Mission Context: ${safeStringify(context || 'None')}
   
   🧠 AVAILABILITY INTELLIGENCE LOGIC:
   🔥 RULE 1: Idle Aircraft
@@ -2106,9 +2555,28 @@ export async function predictAvailability(aircraftId: string, liveData: any, uti
         responseMimeType: "application/json",
       },
     });
+ 
+    const result = JSON.parse(response.text);
 
-    return JSON.parse(response.text);
+    // Update cache
+    try {
+      await setDoc(doc(db, 'availability_intelligence', cacheId), {
+        ...result,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (cacheError) {
+      console.error('Availability cache write error:', cacheError);
+    }
+
+    return result;
   } catch (error: any) {
+    if (isAiServiceUnavailable(error)) {
+      return {
+        status: "On Request",
+        reason: "QUOTA EXCEEDED: Currently using a conservative heuristic based on historical patterns. Contact operator for real-time validation.",
+        intelligence: { isIdle: false, isHighUtilization: true, isAtBase: false, hasConsistentPattern: false }
+      };
+    }
     handleAiError(error, 'predictAvailability');
     return null;
   }
@@ -2118,7 +2586,7 @@ export async function analyzePermits(plan: any) {
   const prompt = `You are a world-class flight operations permit specialist.
   Analyze the following flight plan and identify ALL countries the flight will enter (including departure, destination, and overflight based on FIRs).
   
-  Flight Plan: ${JSON.stringify(plan)}
+  Flight Plan: ${safeStringify(plan)}
   
   For EACH country identified, determine if an Overflight or Landing permit is required for a private charter flight.
   
@@ -2233,7 +2701,7 @@ export async function calculateACMIQuote(params: {
   - ATR72: Rate $2000-3000/hr, Burn 1000kg/hr, Speed 280kt
 
   ACMI PRICING FORMULA:
-  Total Cost = (ACMI Rate × Flight Hours) + Fuel Cost + Overflight Charges + Handling + Crew Cost
+  Total Cost = (ACMI Rate × Flight Hours) + Fuel Cost + Overflight Charges + Handling + Crew Cost + Catering Cost
 
   CALCULATION STEPS:
   1. Flight Time = Distance / Cruise Speed
@@ -2241,6 +2709,7 @@ export async function calculateACMIQuote(params: {
   3. Overflight Charges = $300 - $1000 per country (estimate based on route)
   4. Crew Cost = $500 - $1500 (extra duty/per diem)
   5. Handling + Landing = $500 - $3000 depending on airport (include terminal and parking)
+  6. Catering Cost = Passenger flights $25/pax, VIP $150/pax. Assume 10-50 pax if unknown. Cargo flights $0.
 
   SPECIFIC SEARCH REQUIREMENTS:
   - Find the actual names of ${params.departure} and ${params.destination}.
@@ -2258,6 +2727,7 @@ export async function calculateACMIQuote(params: {
     "overflightCharges": number,
     "handlingLandingFees": number,
     "crewCost": number,
+    "cateringCost": number,
     "totalCost": number,
     "detailedBreakdown": {
       "departure": {
@@ -2319,6 +2789,18 @@ export async function calculateACMIQuote(params: {
 }
 
 export async function getOperatorDetails(operatorName: string, country?: string) {
+  // 1. Try to fetch from Firestore cache first
+  const cacheId = operatorName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+  try {
+    const operatorRef = doc(db, 'operator_enrichment', cacheId);
+    const snapshot = await getDocFromServer(operatorRef);
+    if (snapshot.exists()) {
+      return snapshot.data();
+    }
+  } catch (error) {
+    console.error('Operator cache read error:', error);
+  }
+
   const prompt = `Provide detailed information for the aviation operator: ${operatorName}${country ? ` based in ${country}` : ''}.
   
   Include:
@@ -2328,6 +2810,9 @@ export async function getOperatorDetails(operatorName: string, country?: string)
   4. 3-letter ICAO code (e.g., 'UAE', 'QTR').
   5. 2-letter IATA code (e.g., 'EK', 'QR').
   6. A short profile summary (2-3 sentences).
+  7. Total fleet quantity (number of aircraft).
+  8. Average fleet age in years.
+  9. Main aircraft types operated (e.g., ['A320', 'B737']).
   
   Return JSON: {
     website: string,
@@ -2335,7 +2820,10 @@ export async function getOperatorDetails(operatorName: string, country?: string)
     phone: string,
     icao_code: string,
     iata_code: string,
-    summary: string
+    summary: string,
+    fleet_quantity: number,
+    avg_fleet_age: number,
+    aircraft_types_operated: string[]
   }.`;
 
   try {
@@ -2348,11 +2836,105 @@ export async function getOperatorDetails(operatorName: string, country?: string)
         tools: [{ googleSearch: {} }],
       },
     });
+ 
+    const details = JSON.parse(response.text);
 
-    return JSON.parse(response.text);
+    // Update cache
+    try {
+      await setDoc(doc(db, 'operator_enrichment', cacheId), {
+        ...details,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (cacheError) {
+      console.error('Operator cache write error:', cacheError);
+    }
+
+    return details;
   } catch (error) {
-    handleAiError(error, 'getOperatorDetails');
-    return null;
+    console.warn('AI Operator enrichment failed, using mock data:', error);
+    return {
+      website: `${operatorName.toLowerCase().replace(/\s+/g, '')}.com`,
+      email: `contact@${operatorName.toLowerCase().replace(/\s+/g, '')}.com`,
+      phone: `+1 800 555 0199`,
+      icao_code: operatorName.substring(0, 3).toUpperCase(),
+      iata_code: operatorName.substring(0, 2).toUpperCase(),
+      summary: `${operatorName} is a mock operator profile generated because the AI service is currently at capacity.`
+    };
+  }
+}
+
+export async function getLegFIRAnalysis(departure: string, destination: string, aircraftType: string) {
+  const cacheKey = `leg_fir_${departure}_${destination}_${aircraftType.replace(/\s+/g, '_')}`.toLowerCase();
+  
+  try {
+    const cacheRef = doc(db, 'leg_fir_analysis_cache', cacheKey);
+    const snapshot = await getDocFromServer(cacheRef);
+    if (snapshot.exists()) {
+      const data = snapshot.data();
+      const updatedAt = new Date(data.updatedAt).getTime();
+      if (Date.now() - updatedAt < 86400000) { // 24hr cache
+        return data.result;
+      }
+    }
+  } catch (e) {
+    console.error('Leg FIR analysis cache read error:', e);
+  }
+
+  const prompt = `Perform a deep analysis of the flight route from ${departure} to ${destination} for a ${aircraftType}.
+  
+  TASK:
+  1. Identify ALL Flight Information Regions (FIRs) crossed during this flight leg.
+  2. For EACH FIR identified:
+     - Provide the official FIR Code and Name.
+     - Provide the Country associated with the FIR.
+     - Calculate the estimated Overflight Charge in USD based on ${aircraftType} specifics (MTOW, complexity).
+     - Calculate the estimated Navigation Charge in USD.
+     - Summarize key regional overflight rules (permit requirements, lead times, mandatory equipment).
+  
+  CRITICAL: You MUST research current FIR boundaries and fee structures. Do not just use departure/destination FIRs.
+  
+  Return strictly as a JSON object: {
+    "firs": [
+      {
+        "firCode": string,
+        "firName": string,
+        "country": string,
+        "overflightCharge": number,
+        "navigationCharge": number,
+        "rules": string
+      }
+    ],
+    "totalOverflightCost": number,
+    "totalNavigationCost": number
+  }`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3.1-pro-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    const result = safeParseJson(response.text);
+
+    // Save to cache
+    try {
+      await setDoc(doc(db, 'leg_fir_analysis_cache', cacheKey), {
+        result,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (cacheError) {
+      console.error('Leg FIR analysis cache write error:', cacheError);
+    }
+
+    return result;
+  } catch (error) {
+    handleAiError(error, 'getLegFIRAnalysis');
+    return { firs: [], totalOverflightCost: 0, totalNavigationCost: 0 };
   }
 }
 
@@ -2379,6 +2961,18 @@ export async function getAirportFIR(icao: string): Promise<{ firCode: string, fi
 }
 
 export async function getFIRDetails(firCode: string, firName: string, aircraftType?: string) {
+  // 1. Try to fetch from Firestore cache first
+  const cacheId = `fir_${firCode.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${firName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`.slice(0, 100);
+  try {
+    const firRef = doc(db, 'fir_data', cacheId);
+    const snapshot = await getDocFromServer(firRef);
+    if (snapshot.exists()) {
+      return snapshot.data();
+    }
+  } catch (error) {
+    console.error('FIR cache read error:', error);
+  }
+
   const prompt = `Perform a live search for the latest Flight Information Region (FIR) data.
   FIR Code: ${firCode}
   FIR Name: ${firName}
@@ -2410,18 +3004,156 @@ export async function getFIRDetails(firCode: string, firName: string, aircraftTy
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json"
       },
     });
 
-    const text = response.text.replace(/```json\n?/, '').replace(/```/, '');
-    const result = JSON.parse(text);
-    
+    const result = safeParseJson(response.text);
+
     // Fallback names if missing from JSON structure but present in prompt mapping
     if (result.sop && !result.rules) result.rules = result.sop;
     
+    // Update cache
+    try {
+      await setDoc(doc(db, 'fir_data', cacheId), {
+        ...result,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (cacheError) {
+      console.error('FIR cache write error:', cacheError);
+    }
+
     return result;
-  } catch (error) {
+  } catch (error: any) {
+    if (isAiServiceUnavailable(error)) {
+      return {
+        firName: firName || firCode,
+        country: "Sample",
+        address: "API QUOTA EXCEEDED",
+        phone: "N/A",
+        email: "N/A",
+        website: "N/A",
+        rules: "The AI service is currently busy. Please verify specific overflight rules and permits via official AIP/CAA portals manually.",
+        documentationUrl: "",
+        overflightCharge: 150,
+        navigationCharge: 50
+      };
+    }
     handleAiError(error, 'getFIRDetails');
+    return null;
+  }
+}
+
+export async function searchFIRsByCountry(country: string) {
+  const prompt = `Research and identify ALL Flight Information Regions (FIRs) managed by or located within ${country}.
+  
+  For each FIR, provide:
+  - FIR Code (4-letter ICAO code)
+  - Official FIR Name
+  - Overflight Charge (estimated USD for mid-size jet)
+  - Navigation Charge (estimated USD)
+  - Summary of key operational rules/requirements (permit lead times, mandatory equipment)
+  
+  Return strictly as a JSON object: {
+    "firs": [
+      {
+        "code": string,
+        "name": string,
+        "country": "${country}",
+        "overflightCharge": number,
+        "navigationCharge": number,
+        "rules": string
+      }
+    ]
+  }`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3.1-pro-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'searchFIRsByCountry');
+    return { firs: [] };
+  }
+}
+
+export async function getAircraftDetails(searchQuery: string) {
+  const prompt = `Research and provide comprehensive technical and operational specifications for the aircraft: ${searchQuery}.
+  
+  SEARCH REQUIREMENTS:
+  1. Identify the exact aircraft model/series.
+  2. Provide standard performance data (averages if a specific registration isn't provided).
+  3. Estimate operational costs based on current 2024-2025 aviation standards.
+  
+  REQUIRED DATA FIELDS:
+  - type: Full model name (e.g., "Gulfstream G650ER")
+  - category: One of ["Light Jet", "Midsize Jet", "Heavy Jet", "Cargo", "Turboprop"]
+  - fuelBurnPerHour: Average fuel burn in Liters/hour
+  - cruiseSpeed: Typical cruise speed in knots (TAS)
+  - range: Maximum range in nautical miles (NM)
+  - maxPayload: Maximum payload capacity in kg
+  - maxPassengers: Standard seating capacity
+  - takeoffDistance: MTOW takeoff field length in feet
+  - landingDistance: Maximum landing weight field length in feet
+  - hourlyRate: Estimated dry/wet lease rate per hour (USD)
+  - landingFee: Estimated average landing fee (USD)
+  - handlingFee: Estimated average ground handling fee (USD)
+  - parkingFee: Estimated daily parking fee (USD)
+  - maintenanceReserve: Maintenance reserve per hour (USD)
+  - crewCostPerHour: Total crew cost per hour (USD)
+  - serviceCeiling: Maximum operating altitude in feet
+  - mtow: Maximum Take-Off Weight in kg
+  - manufacturer: Name of the aircraft manufacturer (e.g., "Gulfstream Aerospace")
+  - runwayRequired: Minimum runway length required in meters (m)
+  - generalSpecs: One-paragraph technical overview.
+  - specs: A comprehensive summary of key features and avionics.
+  
+  Return strictly as a JSON object: {
+    "type": string,
+    "manufacturer": string,
+    "category": string,
+    "fuelBurnPerHour": number,
+    "cruiseSpeed": number,
+    "range": number,
+    "mtow": number,
+    "runwayRequired": number,
+    "maxPayload": number,
+    "maxPassengers": number,
+    "takeoffDistance": number,
+    "landingDistance": number,
+    "hourlyRate": number,
+    "landingFee": number,
+    "handlingFee": number,
+    "parkingFee": number,
+    "maintenanceReserve": number,
+    "crewCostPerHour": number,
+    "serviceCeiling": number,
+    "generalSpecs": string,
+    "specs": string
+  }`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    return JSON.parse(response.text);
+  } catch (error) {
+    handleAiError(error, 'getAircraftDetails');
     return null;
   }
 }

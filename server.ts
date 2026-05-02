@@ -67,16 +67,16 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 
 // Advanced Aircraft Database
 const AIRCRAFT_DATA: Record<string, any> = {
-  'A320': { rate: 5500, fuelBurn: 2500, speed: 450, seats: 180, payload: 18000, volume: 37, type: 'passenger', category: 'Narrowbody', mtow: 77000 },
-  'B737': { rate: 5000, fuelBurn: 2600, speed: 450, seats: 160, payload: 17000, volume: 30, type: 'passenger', category: 'Narrowbody', mtow: 79000 },
-  'B737-800F': { rate: 5000, fuelBurn: 2600, speed: 450, seats: 0, payload: 23000, volume: 140, type: 'cargo', category: 'Narrowbody', mtow: 79000 },
-  'A321F': { rate: 6000, fuelBurn: 2700, speed: 450, seats: 0, payload: 27000, volume: 160, type: 'cargo', category: 'Narrowbody', mtow: 93500 },
-  'B767F': { rate: 10000, fuelBurn: 4500, speed: 460, seats: 0, payload: 52000, volume: 400, type: 'cargo', category: 'Widebody', mtow: 186000 },
-  'B777F': { rate: 15000, fuelBurn: 7000, speed: 490, seats: 0, payload: 100000, volume: 650, type: 'cargo', category: 'Widebody', mtow: 347000 },
-  'B777': { rate: 15000, fuelBurn: 7000, speed: 490, seats: 350, payload: 60000, volume: 150, type: 'passenger', category: 'Widebody', mtow: 347000 },
-  'A330': { rate: 10000, fuelBurn: 5500, speed: 470, seats: 300, payload: 45000, volume: 120, type: 'passenger', category: 'Widebody', mtow: 242000 },
-  'ATR72': { rate: 2500, fuelBurn: 1000, speed: 280, seats: 70, payload: 7500, volume: 20, type: 'passenger', category: 'Regional', mtow: 23000 },
-  'G650': { rate: 8000, fuelBurn: 1500, speed: 510, seats: 14, payload: 2500, volume: 5, type: 'vip', vip: true, category: 'Business Jet', mtow: 45000 },
+  'A320': { rate: 5500, fuelBurn: 2500, speed: 450, seats: 180, payload: 18000, volume: 37, type: 'passenger', category: 'Narrowbody', mtow: 77000, dynamicPricing: true },
+  'B737': { rate: 5000, fuelBurn: 2600, speed: 450, seats: 160, payload: 17000, volume: 30, type: 'passenger', category: 'Narrowbody', mtow: 79000, dynamicPricing: true },
+  'B737-800F': { rate: 5000, fuelBurn: 2600, speed: 450, seats: 0, payload: 23000, volume: 140, type: 'cargo', category: 'Narrowbody', mtow: 79000, dynamicPricing: true },
+  'A321F': { rate: 6000, fuelBurn: 2700, speed: 450, seats: 0, payload: 27000, volume: 160, type: 'cargo', category: 'Narrowbody', mtow: 93500, dynamicPricing: true },
+  'B767F': { rate: 10000, fuelBurn: 4500, speed: 460, seats: 0, payload: 52000, volume: 400, type: 'cargo', category: 'Widebody', mtow: 186000, dynamicPricing: true },
+  'B777F': { rate: 15000, fuelBurn: 7000, speed: 490, seats: 0, payload: 100000, volume: 650, type: 'cargo', category: 'Widebody', mtow: 347000, dynamicPricing: true },
+  'B777': { rate: 15000, fuelBurn: 7000, speed: 490, seats: 350, payload: 60000, volume: 150, type: 'passenger', category: 'Widebody', mtow: 347000, dynamicPricing: true },
+  'A330': { rate: 10000, fuelBurn: 5500, speed: 470, seats: 300, payload: 45000, volume: 120, type: 'passenger', category: 'Widebody', mtow: 242000, dynamicPricing: true },
+  'ATR72': { rate: 2500, fuelBurn: 1000, speed: 280, seats: 70, payload: 7500, volume: 20, type: 'passenger', category: 'Regional', mtow: 23000, dynamicPricing: true },
+  'G650': { rate: 8000, fuelBurn: 1500, speed: 510, seats: 14, payload: 2500, volume: 5, type: 'vip', vip: true, category: 'Business Jet', mtow: 45000, dynamicPricing: true },
 };
 
 // Mock Active Fleet for Empty Leg Detection
@@ -240,6 +240,115 @@ app.get("/api/v1/safety/notams/:icao", (req, res) => {
 });
 
 // Nearby Airports Search (PostGIS)
+app.get("/api/v1/charts/skyvector/:layer/:z/:x/:y", async (req, res) => {
+  const { layer, z, x, y } = req.params;
+  
+  // Map layer name to SkyVector internal ID
+  const layerIdMap: Record<string, string> = {
+    'vfr': '301',
+    'lo': '302',
+    'hi': '304'
+  };
+  
+  const skyVectorLayer = layerIdMap[layer] || '301';
+  // SkyVector changes cycle approximately every 28 days.
+  // Current known cycle for late April 2026 is 2605.
+  const cycle = '2605'; 
+  
+  // Use a more reliable set of host candidates. Primary should be skyvector.com directly.
+  const hosts = ['skyvector.com', 'charts.skyvector.com', 'charts2.skyvector.com'];
+  
+  // We'll try the first host, but we should handle the ENOTFOUND errors better
+  const tryFetch = async (attempt: number = 0): Promise<Response> => {
+    if (attempt >= hosts.length) throw new Error("All SkyVector hosts failed");
+    
+    const currentHost = hosts[attempt];
+    const url = `https://${currentHost}/tiles/${skyVectorLayer}/${cycle}/${z}/${x}/${y}.jpg`;
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'Referer': 'https://skyvector.com/',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+      if (!response.ok && response.status !== 404) {
+        return tryFetch(attempt + 1);
+      }
+      return response;
+    } catch (e) {
+      console.warn(`Host ${currentHost} failed (DNS or Network):`, e instanceof Error ? e.message : String(e));
+      return tryFetch(attempt + 1);
+    }
+  };
+  
+  // Local cache path
+  const cacheDir = path.join(process.cwd(), 'db', 'charts_cache', layer, z, x);
+  const cacheFile = path.join(cacheDir, `${y}.jpg`);
+
+  try {
+    // Check local storage first
+    if (fs.existsSync(cacheFile)) {
+      const stats = fs.statSync(cacheFile);
+      // Only use cache if it's less than 30 days old (AIRAC cycles are 28 days)
+      if (Date.now() - stats.mtimeMs < 30 * 24 * 60 * 60 * 1000) {
+        return res.sendFile(cacheFile);
+      }
+    }
+
+    const response = await tryFetch();
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        // Maybe cycle is wrong, but 404 is a valid response from the server at least
+        return res.status(404).json({ error: "Tile not found (check cycle/coordinates)" });
+      }
+      throw new Error(`SkyVector returned ${response.status}`);
+    }
+
+    const buffer = await response.arrayBuffer();
+    const data = Buffer.from(buffer);
+
+    // Ensure cache directory exists and store locally
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(cacheFile, data);
+
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=2592000'); // 30 days
+    res.send(data);
+  } catch (error) {
+    console.error(`Error proxying SkyVector tile:`, error);
+    res.status(502).json({ error: "Failed to fetch chart tile" });
+  }
+});
+
+app.get("/api/v1/charts/stats", async (req, res) => {
+  const cacheDir = path.join(process.cwd(), 'db', 'charts_cache');
+  let count = 0;
+  let size = 0;
+
+  function countFiles(dir: string) {
+    if (!fs.existsSync(dir)) return;
+    const files = fs.readdirSync(dir);
+    for (const file of files) {
+      const fullPath = path.join(dir, file);
+      if (fs.statSync(fullPath).isDirectory()) {
+        countFiles(fullPath);
+      } else {
+        count++;
+        size += fs.statSync(fullPath).size;
+      }
+    }
+  }
+
+  try {
+    countFiles(cacheDir);
+    res.json({ tileCount: count, totalSize: (size / (1024 * 1024)).toFixed(2) + ' MB' });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to get stats" });
+  }
+});
+
 app.get("/api/airports/nearby", async (req, res) => {
   try {
     const { lat, lng, radius = 50 } = req.query;
@@ -736,7 +845,9 @@ app.post("/api/acmi/calculate", async (req, res) => {
       multipliers = { demand: 1, seasonality: 1, urgency: 1, region: 1 },
       brokerMargin = 0.12,
       riskLevel = 'Normal',
-      totalBudget
+      totalBudget,
+      passengers = 0,
+      isVip = false
     } = req.body;
 
     if (!departure || !destination || !aircraftType) {
@@ -751,7 +862,8 @@ app.post("/api/acmi/calculate", async (req, res) => {
     if (distance === 0) distance = 1500; 
 
     // 2. Fetch Aircraft Data
-    const ac = AIRCRAFT_DATA[aircraftType] || AIRCRAFT_DATA['A320'];
+    const aircraftKey = aircraftType.includes('B737-800') ? 'B737' : aircraftType;
+    const ac = AIRCRAFT_DATA[aircraftKey] || AIRCRAFT_DATA['A320'];
     
     // 3. Calculation Logic (High-Fidelity)
     const blockHours = (distance / ac.speed) * 1.15 + 0.45;
@@ -797,12 +909,22 @@ app.post("/api/acmi/calculate", async (req, res) => {
     const airportTotal = landingFee + handlingFee + 300; 
     const crewCost = blockHours < 10 ? 1200 : (blockHours / 10) * 1200;
     
+    // Catering Cost
+    let cateringCost = 0;
+    if (ac.type === 'passenger' || ac.type === 'vip') {
+      const paxCount = passengers || Math.round(ac.seats * 0.8) || 10;
+      const cateringPerPax = (isVip || ac.vip) ? 150 : 25;
+      cateringCost = paxCount * cateringPerPax;
+      intelligenceSignals.push(`CATERING: Included ${isVip || ac.vip ? 'VIP' : 'standard'} catering for ~${paxCount} pax at $${cateringPerPax}/head.`);
+    }
+
     // Positioning Cost (THRESHOLD RULE: 1000km / ~540NM)
     const positioningDistance = distance > 540 ? distance * 0.4 : 0; // Simplified for demo
     const positioningCost = positioningDistance > 0 ? (positioningDistance / ac.speed * ac.rate) + (positioningDistance / ac.speed * ac.fuelBurn * fuelPrice) + 800 : 0;
     if (positioningCost > 0) intelligenceSignals.push(`POSITIONING: Enforced mandatory positioning cost for distance > 1000km.`);
 
-    const operationalSubtotal = coreFlightCost + fuelCost + overflightCharges + airportTotal + crewCost + positioningCost;
+    const operationalSubtotal = coreFlightCost + fuelCost + overflightCharges + airportTotal + crewCost + positioningCost + cateringCost;
+
 
     // Risk & Market Adjustments
     const marketMultiplier = (multipliers.demand || 1) * 
@@ -856,6 +978,35 @@ app.post("/api/acmi/calculate", async (req, res) => {
       flightTimeHours: flightHours,
       distanceNm: distance,
       intelligence: intelligenceSignals,
+      detailedBreakdown: {
+        departure: {
+          name: AIRPORTS[departure]?.city || departure,
+          icao: departure,
+          iata: departure.substring(1),
+          handlingAgency: "SkyBridge Aviation",
+          navigational: 500,
+          terminal: 300,
+          parking: 200,
+          fuel: Math.round(fuelCost * 0.4)
+        },
+        arrival: {
+          name: AIRPORTS[destination]?.city || destination,
+          icao: destination,
+          iata: destination.substring(1),
+          handlingAgency: "Global Ground Handler",
+          navigational: 600,
+          terminal: 400,
+          parking: 300,
+          fuel: Math.round(fuelCost * 0.6)
+        },
+        route: {
+          totalDistanceNm: Math.round(distance),
+          firs: [
+            { name: "Transit FIR 1", code: departure.substring(0, 2), charge: Math.round(overflightCharges * 0.4) },
+            { name: "Transit FIR 2", code: destination.substring(0, 2), charge: Math.round(overflightCharges * 0.6) }
+          ]
+        }
+      },
       breakdown: {
         acmi: Math.round(coreFlightCost),
         fuel: Math.round(fuelCost),
@@ -864,6 +1015,7 @@ app.post("/api/acmi/calculate", async (req, res) => {
         landing: Math.round(landingFee),
         crew: Math.round(crewCost),
         positioning: Math.round(positioningCost),
+        catering: Math.round(cateringCost),
         marketAdjustment: Math.round(marketAdjustment),
         riskAdjustment: Math.round(riskAdjustment),
         contingency: Math.round(contingency),

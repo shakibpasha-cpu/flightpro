@@ -51,19 +51,28 @@ export const CHART_LAYERS = {
   skyVectorVfr: {
     id: 'skyVectorVfr',
     name: 'SkyVector VFR',
-    url: "https://skyvector.com/tiles/301/{z}/{x}/{y}.jpg",
+    url: "/api/v1/charts/skyvector/vfr/{z}/{x}/{y}.jpg",
     attribution: '&copy; SkyVector',
     maxZoom: 11,
-    tms: false,
+    tms: true,
     subdomains: []
   },
   skyVectorIfrLow: {
     id: 'skyVectorIfrLow',
     name: 'SkyVector IFR Low',
-    url: "https://skyvector.com/tiles/304/{z}/{x}/{y}.jpg",
+    url: "/api/v1/charts/skyvector/lo/{z}/{x}/{y}.jpg",
     attribution: '&copy; SkyVector',
     maxZoom: 11,
-    tms: false,
+    tms: true,
+    subdomains: []
+  },
+  skyVectorIfrHigh: {
+    id: 'skyVectorIfrHigh',
+    name: 'SkyVector IFR High',
+    url: "/api/v1/charts/skyvector/hi/{z}/{x}/{y}.jpg",
+    attribution: '&copy; SkyVector',
+    maxZoom: 11,
+    tms: true,
     subdomains: []
   }
 };

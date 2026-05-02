@@ -1,14 +1,17 @@
 import React, { useState } from 'react';
 import { Globe, Shield, DollarSign, Zap, Loader2, CheckCircle2, ChevronRight, AlertTriangle, CloudRain, Info, Phone, Mail, Link as LinkIcon, FileText } from 'lucide-react';
-import { getOptimizedRoute, getFIRDetails, fetchSpecificCharge, fetchFIRRules } from '../services/aiService';
+import { getOptimizedRoute, getFIRDetails, fetchSpecificCharge, fetchFIRRules, getLegFIRAnalysis } from '../services/aiService';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface FIR {
   name: string;
+  code?: string;
   country: string;
   rules?: string;
+  address?: string;
   overflightCharge: number;
   navigationCharge: number;
+  polygon?: [number, number][];
   details?: {
     address: string;
     phone: string;
@@ -24,6 +27,9 @@ interface Leg {
   departure: string;
   destination: string;
   firs: FIR[];
+  costs?: {
+    total: number;
+  };
 }
 
 interface FIRAnalysisProps {
@@ -31,15 +37,86 @@ interface FIRAnalysisProps {
   firs?: FIR[];
   departure: string;
   destination: string;
+  onLegsChange?: (legs: Leg[]) => void;
 }
 
-export default function FIRAnalysis({ legs, firs: initialFirs, departure, destination }: FIRAnalysisProps) {
+export default function FIRAnalysis({ legs, firs: initialFirs, departure: initialDeparture, destination: initialDestination, onLegsChange }: FIRAnalysisProps) {
   const [firs, setFirs] = useState<FIR[]>(initialFirs || []);
   const [displayLegs, setDisplayLegs] = useState<Leg[]>(legs || []);
+  const [departure, setDeparture] = useState(initialDeparture || '');
+  const [destination, setDestination] = useState(initialDestination || '');
   const [optimizing, setOptimizing] = useState(false);
+  const [fetchingAll, setFetchingAll] = useState(false);
+  const [analyzingRoute, setAnalyzingRoute] = useState(false);
   const [optimization, setOptimization] = useState<any>(null);
   const [fetchingDetails, setFetchingDetails] = useState<string | null>(null);
   const [optimizationCriteria, setOptimizationCriteria] = useState<string>('balanced');
+
+  const handleRouteAnalysis = async () => {
+    if (!departure || !destination) return;
+    setAnalyzingRoute(true);
+    setOptimization(null);
+    try {
+      const result = await getLegFIRAnalysis(departure, destination, 'Heavy Jet');
+      if (result && result.firs) {
+        const newLeg: Leg = {
+          departure,
+          destination,
+          firs: result.firs.map((f: any) => ({
+            name: f.firName,
+            code: f.firCode,
+            country: f.country,
+            overflightCharge: f.overflightCharge,
+            navigationCharge: f.navigationCharge,
+            rules: f.rules
+          })),
+          costs: { total: result.totalOverflightCost + result.totalNavigationCost }
+        };
+        setDisplayLegs([newLeg]);
+        onLegsChange?.([newLeg]);
+      }
+    } catch (error) {
+      console.error('Route Analysis Error:', error);
+    } finally {
+      setAnalyzingRoute(false);
+    }
+  };
+
+  const handleFetchAllDetails = async () => {
+    if (fetchingAll) return;
+    setFetchingAll(true);
+    try {
+      const updatedLegs = [];
+      for (const leg of displayLegs) {
+        const enrichedFirs = [];
+        for (const fir of leg.firs) {
+          if (fir.address) {
+            enrichedFirs.push(fir);
+          } else {
+            const details = await getFIRDetails(fir.code || fir.name?.split(' ')[0] || 'UNK', fir.name);
+            enrichedFirs.push({
+              ...fir,
+              ...details,
+              details,
+              rules: details?.rules || details?.sop || fir.rules,
+              overflightCharge: details?.overflightCharge || fir.overflightCharge,
+              navigationCharge: details?.navigationCharge || fir.navigationCharge
+            });
+            // Delay to avoid quota burst
+            await new Promise(r => setTimeout(r, 800));
+          }
+        }
+        updatedLegs.push({ ...leg, firs: enrichedFirs });
+      }
+      
+      setDisplayLegs(updatedLegs);
+      onLegsChange?.(updatedLegs);
+    } catch (error) {
+      console.error('Error fetching all FIR details:', error);
+    } finally {
+      setFetchingAll(false);
+    }
+  };
 
   const handleOptimize = async () => {
     setOptimizing(true);
@@ -59,31 +136,32 @@ export default function FIRAnalysis({ legs, firs: initialFirs, departure, destin
   const handleFetchDetails = async (firCode: string, firName: string) => {
     setFetchingDetails(firCode);
     try {
-      const [details, overflight, navigation, rules] = await Promise.all([
-        getFIRDetails(firCode, firName),
-        fetchSpecificCharge(firCode, firName, 'overflight'),
-        fetchSpecificCharge(firCode, firName, 'navigation'),
-        fetchFIRRules(firCode, firName)
-      ]);
+      const details = await getFIRDetails(firCode, firName);
+      const overflight = await fetchSpecificCharge(firCode, firName, 'overflight');
+      const navigation = await fetchSpecificCharge(firCode, firName, 'navigation');
+      const rules = await fetchFIRRules(firCode, firName);
 
       const updatedFir = (f: FIR) => {
         if (f.name === firName) {
           return { 
             ...f, 
+            ...details,
             details, 
-            rules: rules || details.sop || f.rules,
-            overflightCharge: overflight || details.overflightCharge || f.overflightCharge, 
-            navigationCharge: navigation || details.navigationCharge || f.navigationCharge 
+            rules: rules || details?.sop || f.rules,
+            overflightCharge: overflight || details?.overflightCharge || f.overflightCharge, 
+            navigationCharge: navigation || details?.navigationCharge || f.navigationCharge 
           };
         }
         return f;
       };
 
       setFirs(prev => prev.map(updatedFir));
-      setDisplayLegs(prev => prev.map(leg => ({
+      const newLegs = displayLegs.map(leg => ({
         ...leg,
         firs: leg.firs.map(updatedFir)
-      })));
+      }));
+      setDisplayLegs(newLegs);
+      onLegsChange?.(newLegs);
     } catch (error) {
       console.error('Error fetching FIR details:', error);
     } finally {
@@ -96,6 +174,42 @@ export default function FIRAnalysis({ legs, firs: initialFirs, departure, destin
 
   return (
     <div className="space-y-6">
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 space-y-4">
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex-1 relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-indigo-500 uppercase">From</span>
+            <input 
+              type="text" 
+              placeholder="ICAO (e.g. OPLR)" 
+              className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-900 border border-transparent focus:border-indigo-500 rounded-xl outline-none transition dark:text-white text-sm font-bold"
+              value={departure}
+              onChange={(e) => setDeparture(e.target.value.toUpperCase())}
+            />
+          </div>
+          <div className="flex-1 relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-emerald-500 uppercase">To</span>
+            <input 
+              type="text" 
+              placeholder="ICAO (e.g. OEJD)" 
+              className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-900 border border-transparent focus:border-indigo-500 rounded-xl outline-none transition dark:text-white text-sm font-bold"
+              value={destination}
+              onChange={(e) => setDestination(e.target.value.toUpperCase())}
+            />
+          </div>
+          <button
+            onClick={handleRouteAnalysis}
+            disabled={analyzingRoute || !departure || !destination}
+            className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-indigo-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {analyzingRoute ? <Loader2 className="animate-spin" size={16} /> : <Zap size={16} />}
+            Analyze Route
+          </button>
+        </div>
+        <p className="text-[10px] text-gray-400 font-medium italic">
+          AI will identify all FIRs crossed, calculate specific charges, and summarize overflight rules for this route.
+        </p>
+      </div>
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Globe className="text-indigo-600 dark:text-indigo-400" size={20} />
@@ -120,6 +234,14 @@ export default function FIRAnalysis({ legs, firs: initialFirs, departure, destin
           >
             {optimizing ? <Loader2 className="animate-spin" size={14} /> : <Zap size={14} />}
             {optimization ? 'Re-Optimize' : 'Optimize Route'}
+          </button>
+          <button
+            onClick={handleFetchAllDetails}
+            disabled={fetchingAll}
+            className="text-xs font-bold bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-full hover:bg-amber-100 dark:hover:bg-amber-900/50 transition flex items-center gap-2 disabled:opacity-50"
+          >
+            {fetchingAll ? <Loader2 className="animate-spin" size={14} /> : <FileText size={14} />}
+            Fetch All FIR Data
           </button>
         </div>
       </div>

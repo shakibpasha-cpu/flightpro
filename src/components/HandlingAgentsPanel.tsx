@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, Mail, Phone, Globe, DollarSign, Building2, CheckCircle2 } from 'lucide-react';
+import { Users, Mail, Phone, Globe, DollarSign, Building2, CheckCircle2, Zap } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface HandlingAgent {
@@ -26,6 +26,8 @@ interface HandlingAgentsPanelProps {
   initialDepartureAgents?: HandlingAgent[];
   selectedInitialAgent?: HandlingAgent;
   onSelectAgent?: (legIdx: number | 'initial', agent: HandlingAgent, type: 'departure' | 'destination') => void;
+  onRefreshAgents?: (legIdx: number, type: 'departure' | 'destination') => void;
+  loading?: boolean;
 }
 
 export default function HandlingAgentsPanel({ 
@@ -33,15 +35,12 @@ export default function HandlingAgentsPanel({
   initialDeparture, 
   initialDepartureAgents, 
   selectedInitialAgent,
-  onSelectAgent
+  onSelectAgent,
+  onRefreshAgents,
+  loading
 }: HandlingAgentsPanelProps) {
   return (
     <div className="space-y-8">
-      <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 mb-4">
-        <Users size={20} />
-        <h3 className="font-black uppercase tracking-widest text-sm text-gray-800 dark:text-white">Ground Handling Database</h3>
-      </div>
-
       <div className="space-y-8">
         {legs.map((leg, legIdx) => {
           const selectedAgent = leg.selectedHandlingAgent;
@@ -58,7 +57,17 @@ export default function HandlingAgentsPanel({
                     </span>
                   </div>
                   <div className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Departure Handling</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Departure Handling</p>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); onRefreshAgents?.(legIdx, 'departure'); }}
+                      disabled={loading}
+                      className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors text-indigo-500"
+                      title="Force refresh local handlers"
+                    >
+                      <Zap size={14} className={loading ? 'animate-pulse' : ''} />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -165,7 +174,17 @@ export default function HandlingAgentsPanel({
                     </span>
                   </div>
                   <div className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Destination Handling</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Destination Handling</p>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); onRefreshAgents?.(legIdx, 'destination'); }}
+                      disabled={loading}
+                      className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors text-indigo-500"
+                      title="Force refresh local handlers"
+                    >
+                      <Zap size={14} className={loading ? 'animate-pulse' : ''} />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

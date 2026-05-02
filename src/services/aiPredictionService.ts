@@ -1,5 +1,6 @@
 import { Type } from "@google/genai";
-import { getAI, handleAiError } from "./aiService";
+import { getAI, handleAiError, isAiInCooldown } from "./aiService";
+import { safeStringify } from "../utils/safeJson";
 
 export interface AIPrediction {
   idleTimePrediction: string;
@@ -14,20 +15,44 @@ export interface AIPrediction {
   analysis: string;
 }
 
+// Global cache for predictions
+const predictionCache: Record<string, { data: AIPrediction, timestamp: number }> = {};
+const pendingPredictions: Record<string, Promise<AIPrediction | null>> = {};
+const CACHE_TTL = 3600000; // 1 hour
+
 export async function predictAircraftAvailability(
   aircraftType: string,
   registration: string,
   history: any[],
   currentStatus: any
 ): Promise<AIPrediction | null> {
-  try {
-    const ai = getAI();
+  const cacheKey = `${aircraftType}_${registration}`.toLowerCase();
+  const now = Date.now();
+
+  // Return pending request if it exists
+  if (pendingPredictions[cacheKey]) {
+    return pendingPredictions[cacheKey];
+  }
+
+  // Check cache
+  if (predictionCache[cacheKey] && (now - predictionCache[cacheKey].timestamp < CACHE_TTL)) {
+    return predictionCache[cacheKey].data;
+  }
+
+  // If AI is in cooldown, return cache (even if stale) or null
+  if (isAiInCooldown()) {
+    return predictionCache[cacheKey]?.data || null;
+  }
+
+  pendingPredictions[cacheKey] = (async () => {
+    try {
+      const ai = getAI();
     const prompt = `
       Analyze the following aircraft data and predict its availability, idle time, potential empty legs, and upcoming maintenance windows.
       
       Aircraft: ${aircraftType} (${registration})
-      Current Status: ${JSON.stringify(currentStatus)}
-      Recent Flight History: ${JSON.stringify(history)}
+      Current Status: ${safeStringify(currentStatus)}
+      Recent Flight History: ${safeStringify(history)}
       
       Based on this data, provide a detailed prediction. 
       - Idle time: When is the aircraft likely to be free next?
@@ -66,9 +91,19 @@ export async function predictAircraftAvailability(
       }
     });
 
-    return JSON.parse(response.text);
+    const result = JSON.parse(response.text) as AIPrediction;
+    
+    // Update cache
+    predictionCache[cacheKey] = { data: result, timestamp: now };
+    delete pendingPredictions[cacheKey];
+    
+    return result;
   } catch (error) {
-    handleAiError(error, 'predictAircraftAvailability');
-    throw error;
+    handleAiError(error, 'predictAircraftAvailability', true);
+    delete pendingPredictions[cacheKey];
+    return null;
   }
+})();
+
+  return pendingPredictions[cacheKey];
 }

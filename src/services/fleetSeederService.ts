@@ -1,6 +1,7 @@
 import { collection, addDoc, getDocs, query, where, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getAI, handleAiError } from './aiService';
+import { safeStringify } from '../utils/safeJson';
 
 export const fleetSeederService = {
   async seedTop10Airlines() {
@@ -69,8 +70,12 @@ export const fleetSeederService = {
             manufacturer: aircraft.type.startsWith('A') ? 'Airbus' : 'Boeing',
             max_range_km: aircraft.family === 'Widebody' ? 12000 : 5000,
             max_payload_kg: aircraft.family === 'Widebody' ? 50000 : 20000,
-            passenger_capacity: aircraft.type.includes('380') ? 500 : (aircraft.type.includes('777') ? 350 : 180),
-            seats: aircraft.type.includes('380') ? 500 : (aircraft.type.includes('777') ? 350 : 180),
+            passenger_capacity: aircraft.family === 'Narrowbody' ? (aircraft.type.includes('321') || aircraft.type.includes('900') ? 220 : 180) :
+                               aircraft.family === 'Widebody' ? (aircraft.type.includes('380') ? 550 : (aircraft.type.includes('777') || aircraft.type.includes('350') ? 350 : 280)) :
+                               aircraft.family === 'Private' || aircraft.type.toLowerCase().includes('global') || aircraft.type.toLowerCase().includes('g650') ? 16 : 8,
+            seats: aircraft.family === 'Narrowbody' ? (aircraft.type.includes('321') || aircraft.type.includes('900') ? 220 : 180) :
+                   aircraft.family === 'Widebody' ? (aircraft.type.includes('380') ? 550 : (aircraft.type.includes('777') || aircraft.type.includes('350') ? 350 : 280)) :
+                   aircraft.family === 'Private' || aircraft.type.toLowerCase().includes('global') || aircraft.type.toLowerCase().includes('g650') ? 16 : 8,
             cruise_speed_kts: 480,
             fuel_burn_kg_per_hr: aircraft.family === 'Widebody' ? 7000 : 2500
           });
@@ -158,7 +163,7 @@ export const fleetSeederService = {
       const response = await fetch('/api/scrape-fleet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ airlineName, url })
+        body: safeStringify({ airlineName, url })
       });
 
       if (!response.ok) throw new Error(`Failed to scrape ${airlineName}`);
@@ -209,6 +214,8 @@ export const fleetSeederService = {
             manufacturer: item.aircraft_type.toLowerCase().includes('airbus') ? 'Airbus' : 
                          item.aircraft_type.toLowerCase().includes('boeing') ? 'Boeing' : 'Other',
             category: item.aircraft_type.toLowerCase().includes('320') || item.aircraft_type.toLowerCase().includes('737') ? 'Narrowbody' : 'Widebody',
+            passenger_capacity: item.aircraft_type.toLowerCase().includes('320') || item.aircraft_type.toLowerCase().includes('737') ? 180 : 300,
+            seats: item.aircraft_type.toLowerCase().includes('320') || item.aircraft_type.toLowerCase().includes('737') ? 180 : 300,
             max_range_km: 8000,
             max_payload_kg: 30000,
             cruise_speed_kts: 450,
@@ -282,7 +289,7 @@ export const fleetSeederService = {
             const response = await fetch('/api/scrape-aircraft-specs', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ aircraftType })
+              body: safeStringify({ aircraftType })
             });
             
             // The endpoint is deprecated, so we'll just use the aircraftType directly in a prompt

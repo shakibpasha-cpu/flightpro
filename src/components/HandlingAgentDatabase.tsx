@@ -3,7 +3,7 @@ import { Globe, Phone, Mail, DollarSign, Plus, Trash2, Edit2, Save, Loader2, Sea
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, orderBy } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
-import { searchHandlingAgents } from '../services/aiService';
+import { searchHandlingAgents, getAirportDetails } from '../services/aiService';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface HandlingAgent {
@@ -14,6 +14,7 @@ interface HandlingAgent {
   phone?: string;
   website?: string;
   baseFee: number;
+  preferred?: boolean;
   additionalServices?: string;
   aircraftRates?: { aircraftType: string; fee: number }[];
 }
@@ -21,7 +22,9 @@ interface HandlingAgent {
 export default function HandlingAgentDatabase() {
   const [agents, setAgents] = useState<HandlingAgent[]>([]);
   const [loading, setLoading] = useState(false);
+  const [bulkLoading, setBulkLoading] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  const [enrichingId, setEnrichingId] = useState<string | null>(null);
   const [suggestedAgents, setSuggestedAgents] = useState<HandlingAgent[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -32,6 +35,7 @@ export default function HandlingAgentDatabase() {
     phone: '',
     website: '',
     baseFee: 0,
+    preferred: false,
     additionalServices: ''
   });
 
@@ -132,11 +136,11 @@ export default function HandlingAgentDatabase() {
 
     try {
       for (const agent of sampleAgents) {
-        await addDoc(collection(db, 'handlingAgents'), agent);
+        await addDoc(collection(db, 'handling_agents'), agent);
       }
       fetchAgents();
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'handlingAgents');
+      handleFirestoreError(error, OperationType.CREATE, 'handling_agents');
     } finally {
       setLoading(false);
     }
@@ -145,12 +149,12 @@ export default function HandlingAgentDatabase() {
   const fetchAgents = async () => {
     setLoading(true);
     try {
-      const q = query(collection(db, 'handlingAgents'), orderBy('icao'));
+      const q = query(collection(db, 'handling_agents'), orderBy('icao'));
       const snapshot = await getDocs(q);
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as HandlingAgent));
       setAgents(Array.from(new Map(data.map(item => [item.id, item])).values()));
     } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, 'handlingAgents');
+      handleFirestoreError(error, OperationType.LIST, 'handling_agents');
     } finally {
       setLoading(false);
     }
@@ -165,15 +169,15 @@ export default function HandlingAgentDatabase() {
     setLoading(true);
     try {
       if (editingId) {
-        await updateDoc(doc(db, 'handlingAgents', editingId), formData as any);
+        await updateDoc(doc(db, 'handling_agents', editingId), formData as any);
         setEditingId(null);
       } else {
-        await addDoc(collection(db, 'handlingAgents'), formData);
+        await addDoc(collection(db, 'handling_agents'), formData);
       }
       setFormData({ icao: '', companyName: '', email: '', phone: '', website: '', baseFee: 0, additionalServices: '', aircraftRates: [] });
       fetchAgents();
     } catch (error) {
-      handleFirestoreError(error, editingId ? OperationType.UPDATE : OperationType.CREATE, 'handlingAgents');
+      handleFirestoreError(error, editingId ? OperationType.UPDATE : OperationType.CREATE, 'handling_agents');
     } finally {
       setLoading(false);
     }
@@ -193,7 +197,18 @@ export default function HandlingAgentDatabase() {
     setSuggesting(true);
     setSuggestedAgents([]);
     try {
-      const result = await searchHandlingAgents(formData.icao, undefined, undefined, undefined, true);
+      // 1. Fetch airport details first to get name and city for better context
+      const aptDetails = await getAirportDetails(formData.icao);
+      
+      // 2. Pass this context to the agent search
+      const result = await searchHandlingAgents(
+        formData.icao, 
+        aptDetails?.name, 
+        aptDetails?.city, 
+        undefined, 
+        true
+      );
+      
       if (result.agents && result.agents.length > 0) {
         setSuggestedAgents(result.agents.map((a: any) => ({ ...a, icao: formData.icao })));
       } else {
@@ -207,6 +222,39 @@ export default function HandlingAgentDatabase() {
     }
   };
 
+  const handleEnrich = async (agent: HandlingAgent) => {
+    if (!agent.id) return;
+    setEnrichingId(agent.id);
+    try {
+      const { enrichHandlingAgent } = await import('../services/aiService');
+      const enriched = await enrichHandlingAgent(agent);
+      
+      // Update in Firestore
+      await updateDoc(doc(db, 'handling_agents', agent.id), enriched);
+      
+      // Update local state
+      setAgents(agents.map(a => a.id === agent.id ? { ...enriched, id: agent.id } : a));
+      
+      alert(`Successfully enriched info for ${agent.companyName}!`);
+    } catch (error) {
+      console.error('Enrichment error:', error);
+      alert('Failed to enrich agent information.');
+    } finally {
+      setEnrichingId(null);
+    }
+  };
+
+  const handleTogglePreferred = async (agent: HandlingAgent) => {
+    if (!agent.id) return;
+    try {
+      const newValue = !agent.preferred;
+      await updateDoc(doc(db, 'handling_agents', agent.id), { preferred: newValue });
+      setAgents(agents.map(a => a.id === agent.id ? { ...a, preferred: newValue } : a));
+    } catch (error) {
+      console.error('Toggle preferred error:', error);
+    }
+  };
+
   const handleSelectSuggested = (agent: HandlingAgent) => {
     setFormData({
       ...formData,
@@ -215,6 +263,7 @@ export default function HandlingAgentDatabase() {
       phone: agent.phone || '',
       website: agent.website || '',
       baseFee: agent.baseFee,
+      preferred: agent.preferred || false,
       additionalServices: agent.additionalServices,
       aircraftRates: agent.aircraftRates || []
     });
@@ -244,10 +293,10 @@ export default function HandlingAgentDatabase() {
     if (!window.confirm('Are you sure you want to delete this handling agent?')) return;
     setLoading(true);
     try {
-      await deleteDoc(doc(db, 'handlingAgents', id));
+      await deleteDoc(doc(db, 'handling_agents', id));
       setAgents(agents.filter(a => a.id !== id));
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'handlingAgents');
+      handleFirestoreError(error, OperationType.DELETE, 'handling_agents');
     } finally {
       setLoading(false);
     }
@@ -264,19 +313,101 @@ export default function HandlingAgentDatabase() {
 
   return (
     <div className="space-y-8">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div className="flex items-center gap-3">
           <button
             onClick={seedData}
             disabled={loading}
-            className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition border border-indigo-100 dark:border-indigo-800 text-xs"
+            className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition border border-indigo-100 dark:border-indigo-800 text-xs shadow-sm"
           >
             <Sparkles size={16} />
-            Seed Agents
+            Seed List
           </button>
           <div>
-            <h2 className="text-2xl font-black text-gray-900 dark:text-white">Handling Agent Database</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Manage ground handling providers and service costs per airport.</p>
+            <h2 className="text-3xl font-black text-gray-900 dark:text-white uppercase tracking-tight">Handling Agents</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 font-medium tracking-tight">Manage ground handling providers and service costs per airport.</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="relative flex-1 md:flex-none md:w-64 group">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-500 group-focus-within:scale-110 transition-transform">
+              <Sparkles size={18} />
+            </div>
+            <input 
+              type="text"
+              placeholder="BULK FETCH BY ICAO (ENTER)"
+              maxLength={4}
+              disabled={bulkLoading}
+              className="w-full pl-10 pr-24 py-3 bg-white dark:bg-gray-800 border-2 border-indigo-100 dark:border-indigo-900/30 rounded-2xl outline-none focus:border-indigo-500 transition-all font-black uppercase text-sm tracking-widest placeholder:text-gray-400 dark:text-white shadow-lg shadow-indigo-100/50 dark:shadow-none disabled:opacity-50"
+              onKeyDown={async (e) => {
+                if (e.key === 'Enter') {
+                  const val = (e.target as HTMLInputElement).value.trim().toUpperCase();
+                  if (val.length < 3) return;
+                  
+                  setBulkLoading(true);
+                  try {
+                    // 1. Get airport details first
+                    const aptDetails = await getAirportDetails(val);
+                    
+                    // 2. Deep search
+                    const result = await searchHandlingAgents(
+                      val, 
+                      aptDetails?.name, 
+                      aptDetails?.city, 
+                      undefined, 
+                      true
+                    );
+
+                    if (result.agents && result.agents.length > 0) {
+                      for (const agent of result.agents) {
+                        const existingQuery = query(
+                          collection(db, 'handling_agents'), 
+                          where('icao', '==', val),
+                          where('companyName', '==', agent.companyName)
+                        );
+                        const existingSnap = await getDocs(existingQuery);
+                        
+                        if (existingSnap.empty) {
+                          await addDoc(collection(db, 'handling_agents'), {
+                            icao: val,
+                            companyName: agent.companyName,
+                            email: agent.email || '',
+                            phone: agent.phone || '',
+                            website: agent.website || '',
+                            baseFee: agent.baseFee || 0,
+                            additionalServices: agent.additionalServices || '',
+                            aircraftRates: agent.aircraftRates || []
+                          });
+                        }
+                      }
+                      await fetchAgents();
+                      (e.target as HTMLInputElement).value = '';
+                      alert(`Successfully imported ${result.agents.length} agent(s) for ${val}!`);
+                    } else {
+                      alert(`No agents found for ${val}.`);
+                    }
+                  } catch (err) {
+                    console.error(err);
+                    alert('Fetch failed. Please try again.');
+                  } finally {
+                    setBulkLoading(false);
+                  }
+                }
+              }}
+            />
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+              {bulkLoading ? (
+                <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400 rounded-lg text-[9px] font-black uppercase">
+                  <Loader2 className="animate-spin" size={10} />
+                  Scraping...
+                </div>
+              ) : (
+                <div className="px-3 py-1 bg-indigo-600 text-white rounded-lg text-[9px] font-black uppercase tracking-tighter shadow-sm group-hover:scale-105 transition-transform">
+                  Enter
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -309,7 +440,7 @@ export default function HandlingAgentDatabase() {
                   required
                   placeholder="e.g. EGLL"
                   className="w-full p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl text-sm uppercase font-bold dark:text-white"
-                  value={formData.icao}
+                  value={formData.icao || ''}
                   onChange={(e) => setFormData({ ...formData, icao: e.target.value.toUpperCase() })}
                 />
               </div>
@@ -321,7 +452,7 @@ export default function HandlingAgentDatabase() {
                   required
                   placeholder="e.g. Signature Flight Support"
                   className="w-full p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl text-sm font-bold dark:text-white"
-                  value={formData.companyName}
+                  value={formData.companyName || ''}
                   onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
                 />
               </div>
@@ -334,7 +465,7 @@ export default function HandlingAgentDatabase() {
                     required
                     placeholder="ops@company.com"
                     className="w-full p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl text-sm dark:text-white"
-                    value={formData.email}
+                    value={formData.email || ''}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   />
                 </div>
@@ -344,7 +475,7 @@ export default function HandlingAgentDatabase() {
                     type="tel" 
                     placeholder="+44..."
                     className="w-full p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl text-sm dark:text-white"
-                    value={formData.phone}
+                    value={formData.phone || ''}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   />
                 </div>
@@ -356,7 +487,7 @@ export default function HandlingAgentDatabase() {
                   type="url" 
                   placeholder="https://..."
                   className="w-full p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl text-sm dark:text-white"
-                  value={formData.website}
+                  value={formData.website || ''}
                   onChange={(e) => setFormData({ ...formData, website: e.target.value })}
                 />
               </div>
@@ -369,10 +500,24 @@ export default function HandlingAgentDatabase() {
                     type="number" 
                     required
                     className="w-full pl-10 p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl text-sm font-bold dark:text-white"
-                    value={formData.baseFee}
-                    onChange={(e) => setFormData({ ...formData, baseFee: parseFloat(e.target.value) })}
+                    value={formData.baseFee ?? ''}
+                    onChange={(e) => setFormData({ ...formData, baseFee: parseFloat(e.target.value) || 0 })}
                   />
                 </div>
+              </div>
+
+              <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl">
+                <input 
+                  type="checkbox"
+                  id="preferred"
+                  className="w-4 h-4 text-indigo-600 rounded bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 focus:ring-indigo-500"
+                  checked={formData.preferred || false}
+                  onChange={(e) => setFormData({ ...formData, preferred: e.target.checked })}
+                />
+                <label htmlFor="preferred" className="text-xs font-bold text-gray-700 dark:text-gray-300 cursor-pointer flex items-center gap-2">
+                  <Sparkles size={14} className={formData.preferred ? "text-amber-500" : "text-gray-400"} />
+                  Preferred Handling Partner
+                </label>
               </div>
 
               <div className="space-y-1">
@@ -380,7 +525,7 @@ export default function HandlingAgentDatabase() {
                 <textarea 
                   placeholder="VIP Lounge, Fueling, Catering..."
                   className="w-full p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl text-sm h-24 resize-none dark:text-white"
-                  value={formData.additionalServices}
+                  value={formData.additionalServices || ''}
                   onChange={(e) => setFormData({ ...formData, additionalServices: e.target.value })}
                 />
               </div>
@@ -402,7 +547,7 @@ export default function HandlingAgentDatabase() {
                     <input
                       type="text"
                       placeholder="e.g. A320"
-                      value={rate.aircraftType}
+                      value={rate.aircraftType || ''}
                       onChange={(e) => handleUpdateAircraftRate(idx, 'aircraftType', e.target.value)}
                       className="flex-1 p-2 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-lg text-sm dark:text-white"
                     />
@@ -530,11 +675,19 @@ export default function HandlingAgentDatabase() {
                 >
                   <div className="flex justify-between items-start mb-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-xs">
+                      <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-black text-xs relative">
                         {agent.icao}
+                        {agent.preferred && (
+                          <div className="absolute -top-1.5 -right-1.5 bg-amber-500 text-white p-0.5 rounded-full shadow-sm">
+                            <Sparkles size={10} fill="currentColor" />
+                          </div>
+                        )}
                       </div>
                       <div>
-                        <h4 className="font-bold text-gray-900 dark:text-white leading-tight">{agent.companyName}</h4>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-gray-900 dark:text-white leading-tight">{agent.companyName}</h4>
+                          {agent.preferred && <span className="text-[9px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-tighter bg-amber-50 dark:bg-amber-900/30 px-1.5 py-0.5 rounded">Preferred</span>}
+                        </div>
                         <div className="flex items-center gap-2 mt-1">
                           <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full uppercase tracking-wider">
                             ${agent.baseFee?.toLocaleString()} Base
@@ -543,6 +696,21 @@ export default function HandlingAgentDatabase() {
                       </div>
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => handleEnrich(agent)}
+                        disabled={enrichingId === agent.id}
+                        title="AI Enrich operational data"
+                        className="p-2 text-gray-400 dark:text-gray-500 hover:text-amber-500 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded-lg transition"
+                      >
+                        {enrichingId === agent.id ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
+                      </button>
+                      <button 
+                        onClick={() => handleTogglePreferred(agent)}
+                        title={agent.preferred ? "Remove preferred status" : "Mark as preferred partner"}
+                        className={`p-2 rounded-lg transition ${agent.preferred ? 'text-amber-500 bg-amber-50 dark:bg-amber-900/30' : 'text-gray-400 dark:text-gray-500 hover:text-amber-500 hover:bg-amber-50'}`}
+                      >
+                        <Save size={16} />
+                      </button>
                       <button 
                         onClick={() => handleEdit(agent)}
                         className="p-2 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition"
@@ -617,12 +785,21 @@ export default function HandlingAgentDatabase() {
                   onClick={async () => {
                     setLoading(true);
                     try {
-                      // Attempt a deep search (forceRefresh = true to bypass stale global contacts)
-                      const result = await searchHandlingAgents(searchQuery.trim().toUpperCase(), undefined, undefined, undefined, true);
+                      // 1. Get airport details first
+                      const aptDetails = await getAirportDetails(searchQuery.trim().toUpperCase());
+                      
+                      // 2. Attempt a deep search (forceRefresh = true to bypass stale global contacts)
+                      const result = await searchHandlingAgents(
+                        searchQuery.trim().toUpperCase(), 
+                        aptDetails?.name, 
+                        aptDetails?.city, 
+                        undefined, 
+                        true
+                      );
                       if (result.agents && result.agents.length > 0) {
                         // Persist these to the database
                         for (const agent of result.agents) {
-                          await addDoc(collection(db, 'handlingAgents'), {
+                          await addDoc(collection(db, 'handling_agents'), {
                             icao: searchQuery.trim().toUpperCase(),
                             companyName: agent.companyName,
                             email: agent.email || '',

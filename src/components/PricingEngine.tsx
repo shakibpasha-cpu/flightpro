@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, Fuel, Globe, Landmark, UserCheck, ShieldCheck, Calculator, Loader2, Plane, MapPin, PlusCircle, TrendingUp, AlertTriangle, Sparkles, Calendar, ClipboardList, Users, Phone, Mail, ExternalLink, FileText, AlertCircle, Info } from 'lucide-react';
+import { DollarSign, Fuel, Globe, Landmark, UserCheck, ShieldCheck, Calculator, Loader2, Plane, MapPin, PlusCircle, TrendingUp, AlertTriangle, Sparkles, Calendar, ClipboardList, Users, Phone, Mail, ExternalLink, FileText, AlertCircle, Info, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -13,6 +13,8 @@ interface Aircraft {
   fuelBurnPerHour: number;
   operator: string;
   operatorName?: string;
+  maxPassengers?: number;
+  maxPayload?: number;
 }
 
 interface PricingEngineProps {
@@ -60,6 +62,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
   const [airportFees, setAirportFees] = useState(0);
   const [crewDutyCost, setCrewDutyCost] = useState(0);
   const [positioningCost, setPositioningCost] = useState(0);
+  const [cateringCost, setCateringCost] = useState(0);
   const [insuranceMultiplier, setInsuranceMultiplier] = useState(1);
   const [contingency, setContingency] = useState(0);
   const [contingencyPercent, setContingencyPercent] = useState(5);
@@ -72,6 +75,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
   // Detailed FIR State
   const [detailedFirs, setDetailedFirs] = useState<Record<string, any>>({});
   const [loadingFirs, setLoadingFirs] = useState<Record<string, boolean>>({});
+  const [showDetailedBreakdown, setShowDetailedBreakdown] = useState(false);
   
   const selectedAircraft = aircraftList.find(a => a.id === selectedAircraftId);
 
@@ -156,6 +160,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
       setParkingFees(result.costs.parkingFee || 0);
       setCrewDutyCost(result.costs.crew);
       setPositioningCost(result.costs.positioning);
+      setCateringCost(result.costs.catering || 0);
       setInsuranceMultiplier(result.multipliers.insurance);
       setContingency(result.costs.contingency);
       setContingencyPercent(5); // Default to 5%
@@ -171,27 +176,37 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
 
       // Calculate alternatives in the background
       setIsCalculatingAlternatives(true);
-      const suggested = await suggestCheaperAlternatives({
-        departure,
-        destination,
-        date,
-        passengers,
-        payload,
-        hoursParked,
-        crewCount,
-        crewDailyRate,
-        numberOfDays,
-        hotelsCost,
-        transportCost,
-        missionType,
-        riskLevel,
-        aircraftBase,
-        isEmptyLeg
-      }, targetAircraftId, aircraftList);
-      setAlternatives(suggested);
-    } catch (error) {
+      try {
+        const suggested = await suggestCheaperAlternatives({
+          departure,
+          destination,
+          date,
+          passengers,
+          payload,
+          hoursParked,
+          crewCount,
+          crewDailyRate,
+          numberOfDays,
+          hotelsCost,
+          transportCost,
+          missionType,
+          riskLevel,
+          aircraftBase,
+          isEmptyLeg
+        }, targetAircraftId, aircraftList);
+        setAlternatives(suggested);
+      } catch (altError) {
+        console.warn('Failed to fetch alternatives:', altError);
+        // We don't fail the whole calculation if alternatives fail
+      }
+    } catch (error: any) {
       console.error('Calculation error:', error);
-      alert('Engine Error: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      const isQuota = error?.message?.toLowerCase().includes('quota') || error?.message?.includes('429');
+      if (isQuota) {
+        alert('The AI engine is currently busy (quota reached). Using direct calculation engine for now. Detailed AI insights will be available shortly.');
+      } else {
+        alert('Engine Error: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      }
     } finally {
       setLoading(false);
       setIsCalculatingAlternatives(false);
@@ -331,6 +346,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
             ['Overflight Charges', `${overflightCharges.toLocaleString()}`],
             ['Airport Fees', `${airportFees.toLocaleString()}`],
             ['Crew Duty Cost', `${crewDutyCost.toLocaleString()}`],
+            ['Catering Costs', `${cateringCost.toLocaleString()}`],
             ['Positioning Cost', `${positioningCost.toLocaleString()}`],
             ['Broker Margin', `${brokerMargin.toLocaleString()}`],
             ['Total Estimated Cost', `${totalCost.toLocaleString()}`],
@@ -360,7 +376,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
     }
   };
 
-  const operationalSum = (blockHours * acmiRate) + fuelCost + overflightCharges + landingFees + handlingFees + parkingFees + crewDutyCost + positioningCost;
+  const operationalSum = (blockHours * acmiRate) + fuelCost + overflightCharges + landingFees + handlingFees + parkingFees + crewDutyCost + positioningCost + cateringCost;
   const totalCost = missionType === 'ACMI Lease' 
     ? (leaseResult?.totalLeaseCost || 0)
     : (operationalSum * insuranceMultiplier) + contingency + brokerMargin;
@@ -374,16 +390,22 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
         </div>
         <div className="flex items-center gap-4">
           {(engineResult || leaseResult) && (
-            <button 
+            <motion.button 
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
               onClick={handleExportQuote}
               disabled={isExporting}
               className="flex items-center gap-2 px-6 py-3 bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 rounded-2xl font-black uppercase tracking-widest text-xs border border-indigo-100 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all shadow-sm disabled:opacity-50"
             >
               {isExporting ? <Loader2 size={16} className="animate-spin" /> : <PlusCircle size={16} />}
               {isExporting ? 'Generating PDF...' : 'Export Detailed Quote'}
-            </button>
+            </motion.button>
           )}
-          <div className="bg-indigo-600 text-white px-6 py-3 rounded-2xl shadow-lg shadow-indigo-200 dark:shadow-none">
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-indigo-600 text-white px-6 py-3 rounded-2xl shadow-lg shadow-indigo-200 dark:shadow-none"
+          >
             <p className="text-[10px] font-bold uppercase tracking-widest opacity-80">
               {engineResult?.priceRange ? 'Estimated Price Range' : 'Total Estimated Cost'}
             </p>
@@ -394,7 +416,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
                 `${totalCost.toLocaleString()}`
               )}
             </p>
-          </div>
+          </motion.div>
         </div>
       </div>
 
@@ -631,7 +653,11 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
                     className="w-full pl-10 p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:text-white text-sm font-bold appearance-none"
                   >
                     <option value="">Select an aircraft...</option>
-                    {aircraftList.map(a => (
+                    {aircraftList.filter(a => {
+                      if (missionType === 'Cargo') return (a.maxPayload || 0) >= payload;
+                      if (missionType === 'ACMI Lease') return true; // Show all for full lease search
+                      return (a.maxPassengers || 0) >= passengers;
+                    }).map(a => (
                       <option key={a.id} value={a.id}>{a.type} ({a.operatorName || a.operator})</option>
                     ))}
                   </select>
@@ -685,9 +711,14 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
 
         {/* Results Panel */}
         <div className="lg:col-span-8 space-y-6">
-          {engineResult && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+          <AnimatePresence>
+            {engineResult && (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="grid grid-cols-1 md:grid-cols-3 gap-6"
+              >
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Availability Score</p>
                   <div className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase ${engineResult.intelligence?.availabilityScore! > 70 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
@@ -724,8 +755,9 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
                   <p className="text-sm font-black text-gray-300 uppercase">No Empty Leg Discount</p>
                 )}
               </div>
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
 
           {missionType === 'ACMI Lease' && leaseResult ? (
             <div className="space-y-6">
@@ -876,251 +908,315 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
               </div>
             </div>
           ) : (
-            <>
-              {/* Formula Visualization */}
-          <div className="bg-indigo-600 p-8 rounded-[2rem] text-white shadow-xl shadow-indigo-200 dark:shadow-none relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-12 opacity-10">
-              <Calculator size={200} />
-            </div>
-            
-            <h4 className="text-[10px] font-black uppercase tracking-[0.2em] mb-8 opacity-70">FINAL MASTER EQUATION</h4>
-            
-            <div className="flex flex-wrap items-center gap-y-8 gap-x-4 relative z-10">
-              <div className="text-4xl font-light opacity-30">[</div>
+            <React.Fragment>
+                {/* Formula Visualization */}
+            <div className="bg-indigo-600 p-8 rounded-[2rem] text-white shadow-xl shadow-indigo-200 dark:shadow-none relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-12 opacity-10">
+                <Calculator size={200} />
+              </div>
               
-              <div className="flex items-center gap-3">
-                <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Base ACMI</p>
-                  <p className="text-xl font-black">${(blockHours * acmiRate).toLocaleString()}</p>
-                  <p className="text-[10px] opacity-50 font-medium mt-1">{blockHours.toFixed(1)} blk hrs × ${acmiRate.toLocaleString()}/hr</p>
+              <div className="flex items-center justify-between mb-8 relative z-10">
+                <h4 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-70">Commercial Flight Calculus</h4>
+                <button 
+                  onClick={() => setShowDetailedBreakdown(!showDetailedBreakdown)}
+                  className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 backdrop-blur-md rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border border-white/10"
+                >
+                  {showDetailedBreakdown ? 'Hide Disclosures' : 'Expand Disclosures'}
+                  <motion.div animate={{ rotate: showDetailedBreakdown ? 180 : 0 }}>
+                    <ChevronDown size={14} />
+                  </motion.div>
+                </button>
+              </div>
+              
+              <div className="flex flex-wrap items-center gap-y-8 gap-x-4 relative z-10">
+                <div className="text-4xl font-light opacity-30">[</div>
+                
+                <div className="group relative cursor-help">
+                  <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 hover:border-white/40 transition-all">
+                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Base ACMI</p>
+                    <p className="text-xl font-black">${(blockHours * acmiRate).toLocaleString()}</p>
+                    <p className="text-[10px] opacity-50 font-medium mt-1">{blockHours.toFixed(1)} blk hrs × ${acmiRate.toLocaleString()}/hr</p>
+                  </div>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-gray-900/95 backdrop-blur-md text-[10px] text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 border border-white/10 shadow-2xl">
+                    <p className="font-black uppercase mb-1 text-indigo-400">Aircraft, Crew, Maintenance, Insurance</p>
+                    <p className="opacity-70 leading-relaxed">The hourly dry rate plus operational overheads for flight and cabin crew engagement.</p>
+                  </div>
                 </div>
                 <div className="text-2xl font-black opacity-30">+</div>
-              </div>
 
-              <div className="flex items-center gap-3">
-                <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Fuel</p>
-                  <p className="text-xl font-black">${fuelCost.toLocaleString()}</p>
-                  {engineResult && (
-                    <p className="text-[10px] opacity-50 font-medium mt-1">
-                      {engineResult.fuelBurnRate.toLocaleString()} kg/hr × ${engineResult.fuelPrice.toFixed(2)}/kg
+                <div className="group relative cursor-help">
+                  <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 hover:border-white/40 transition-all">
+                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Fuel</p>
+                    <p className="text-xl font-black">${fuelCost.toLocaleString()}</p>
+                    {engineResult && (
+                      <p className="text-[10px] opacity-50 font-medium mt-1">
+                        {engineResult.fuelBurnRate.toLocaleString()} kg/hr × ${engineResult.fuelPrice.toFixed(2)}/kg
+                      </p>
+                    )}
+                  </div>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-gray-900/95 backdrop-blur-md text-[10px] text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 border border-white/10 shadow-2xl">
+                    <p className="font-black uppercase mb-1 text-amber-400">Jet A-1 Fuel Consumption</p>
+                    <p className="opacity-70 leading-relaxed">Based on real-time Platts index and specific aircraft burn rates for this route.</p>
+                  </div>
+                </div>
+                <div className="text-2xl font-black opacity-30">+</div>
+
+                <div className="group relative cursor-help">
+                  <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 hover:border-white/40 transition-all">
+                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Overflight</p>
+                    <p className="text-xl font-black">${overflightCharges.toLocaleString()}</p>
+                  </div>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-gray-900/95 backdrop-blur-md text-[10px] text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 border border-white/10 shadow-2xl">
+                    <p className="font-black uppercase mb-1 text-blue-400">Navigation & FIR Charges</p>
+                    <p className="opacity-70 leading-relaxed">Eurocontrol and local FIR fees for passing through sovereign airspace.</p>
+                  </div>
+                </div>
+                <div className="text-2xl font-black opacity-30">+</div>
+
+                <div className="group relative cursor-help">
+                  <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 hover:border-white/40 transition-all">
+                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Airport</p>
+                    <p className="text-xl font-black">${(landingFees + handlingFees + parkingFees).toLocaleString()}</p>
+                    <div className="text-[9px] opacity-50 font-medium mt-1 space-y-0.5">
+                      <p>Lnd: ${landingFees.toLocaleString()}</p>
+                      <p>Hnd: ${handlingFees.toLocaleString()}</p>
+                      <p>Prk: ${parkingFees.toLocaleString()}</p>
+                    </div>
+                  </div>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-gray-900/95 backdrop-blur-md text-[10px] text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 border border-white/10 shadow-2xl">
+                    <p className="font-black uppercase mb-1 text-emerald-400">Ground & Terminal Fees</p>
+                    <p className="opacity-70 leading-relaxed">Includes landing permits, handling agency fees, and aircraft parking for the mission duration.</p>
+                  </div>
+                </div>
+                <div className="text-2xl font-black opacity-30">+</div>
+
+                <div className="group relative cursor-help">
+                  <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 hover:border-white/40 transition-all">
+                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Crew</p>
+                    <p className="text-xl font-black">${crewDutyCost.toLocaleString()}</p>
+                  </div>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-gray-900/95 backdrop-blur-md text-[10px] text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 border border-white/10 shadow-2xl">
+                    <p className="font-black uppercase mb-1 text-rose-400">Crew Per Diems & Hotels</p>
+                    <p className="opacity-70 leading-relaxed">Accommodation and daily allowances for flight deck and cabin crew based on duty time.</p>
+                  </div>
+                </div>
+                <div className="text-2xl font-black opacity-30">+</div>
+
+                {cateringCost > 0 && (
+                  <div className="group relative cursor-help">
+                    <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 hover:border-white/40 transition-all">
+                      <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Catering</p>
+                      <p className="text-xl font-black">${cateringCost.toLocaleString()}</p>
+                    </div>
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-gray-900/95 backdrop-blur-md text-[10px] text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 border border-white/10 shadow-2xl">
+                      <p className="font-black uppercase mb-1 text-pink-400">In-flight Service</p>
+                      <p className="opacity-70 leading-relaxed">Premium or standard catering based on mission profile and passenger count.</p>
+                    </div>
+                    <div className="text-2xl font-black opacity-30">+</div>
+                  </div>
+                )}
+
+                <div className="group relative cursor-help">
+                  <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 hover:border-white/40 transition-all">
+                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Pos.</p>
+                    <p className="text-xl font-black">${positioningCost.toLocaleString()}</p>
+                  </div>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-gray-900/95 backdrop-blur-md text-[10px] text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 border border-white/10 shadow-2xl">
+                    <p className="font-black uppercase mb-1 text-indigo-400">Positioning Leg</p>
+                    <p className="opacity-70 leading-relaxed">Cost to move aircraft from its current base to the mission departure point.</p>
+                  </div>
+                </div>
+
+                <div className="text-4xl font-light opacity-30">]</div>
+                <div className="text-2xl font-black opacity-30">×</div>
+
+                <div className="group relative cursor-help">
+                  <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 hover:border-white/40 transition-all">
+                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Insurance Multiplier</p>
+                    <p className="text-xl font-black">
+                      x{insuranceMultiplier.toFixed(2)}
                     </p>
-                  )}
-                </div>
-                <div className="text-2xl font-black opacity-30">+</div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Overflight</p>
-                  <p className="text-xl font-black">${overflightCharges.toLocaleString()}</p>
-                </div>
-                <div className="text-2xl font-black opacity-30">+</div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Airport</p>
-                  <p className="text-xl font-black">${(landingFees + handlingFees + parkingFees).toLocaleString()}</p>
-                  <div className="text-[9px] opacity-50 font-medium mt-1 space-y-0.5">
-                    <p>Lnd: ${landingFees.toLocaleString()}</p>
-                    <p>Hnd: ${handlingFees.toLocaleString()}</p>
-                    <p>Prk: ${parkingFees.toLocaleString()}</p>
+                    <p className="text-[10px] opacity-50 font-medium mt-1">+${(operationalSum * (insuranceMultiplier - 1)).toLocaleString()}</p>
+                  </div>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-gray-900/95 backdrop-blur-md text-[10px] text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 border border-white/10 shadow-2xl">
+                    <p className="font-black uppercase mb-1 text-cyan-400">Risk & Insurance Layer</p>
+                    <p className="opacity-70 leading-relaxed">Adjusted based on sector risk (Conflict zones, high traffic, etc.) and specific hull insurance premiums.</p>
                   </div>
                 </div>
                 <div className="text-2xl font-black opacity-30">+</div>
-              </div>
 
-              <div className="flex items-center gap-3">
-                <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Crew</p>
-                  <p className="text-xl font-black">${crewDutyCost.toLocaleString()}</p>
-                </div>
-                <div className="text-2xl font-black opacity-30">+</div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Pos.</p>
-                  <p className="text-xl font-black">${positioningCost.toLocaleString()}</p>
-                </div>
-              </div>
-
-              <div className="text-4xl font-light opacity-30">]</div>
-              <div className="text-2xl font-black opacity-30">×</div>
-
-              <div className="flex items-center gap-3">
-                <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Insurance Multiplier</p>
-                  <p className="text-xl font-black">
-                    x{insuranceMultiplier.toFixed(2)}
-                  </p>
-                  <p className="text-[10px] opacity-50 font-medium mt-1">+${(operationalSum * (insuranceMultiplier - 1)).toLocaleString()}</p>
-                </div>
-                <div className="text-2xl font-black opacity-30">+</div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Contingency</p>
-                  <p className="text-xl font-black">${contingency.toLocaleString()}</p>
-                </div>
-                {brokerMargin > 0 && <div className="text-2xl font-black opacity-30">+</div>}
-              </div>
-
-              {brokerMargin > 0 && (
-                <div className="flex items-center gap-3">
-                  <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
-                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Margin</p>
-                    <p className="text-xl font-black">${brokerMargin.toLocaleString()}</p>
+                <div className="group relative cursor-help">
+                  <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 hover:border-white/40 transition-all">
+                    <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Contingency</p>
+                    <p className="text-xl font-black">${contingency.toLocaleString()}</p>
                   </div>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-gray-900/95 backdrop-blur-md text-[10px] text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 border border-white/10 shadow-2xl">
+                    <p className="font-black uppercase mb-1 text-orange-400">Operational Buffer</p>
+                    <p className="opacity-70 leading-relaxed">Default 5% buffer for unforeseen ATC delays, holding patterns, or de-icing requirements.</p>
+                  </div>
+                  {brokerMargin > 0 && <div className="text-2xl font-black opacity-30">+</div>}
                 </div>
+
+                {brokerMargin > 0 && (
+                  <div className="group relative cursor-help">
+                    <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 hover:border-white/40 transition-all">
+                      <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Margin</p>
+                      <p className="text-xl font-black">${brokerMargin.toLocaleString()}</p>
+                    </div>
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-3 bg-gray-900/95 backdrop-blur-md text-[10px] text-white rounded-xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 border border-white/10 shadow-2xl">
+                      <p className="font-black uppercase mb-1 text-violet-400">Commercial Margin</p>
+                      <p className="opacity-70 leading-relaxed">Broker agency fee or operational profit margin applied to the net cost.</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="text-2xl font-black opacity-50">=</div>
+
+                <div className="bg-white text-indigo-600 p-6 rounded-3xl shadow-2xl">
+                  <p className="text-[10px] font-black uppercase tracking-widest mb-1">Total Cost</p>
+                  <p className="text-3xl font-black">${totalCost.toLocaleString()}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Expandable Detailed Breakdown Section */}
+            <AnimatePresence>
+              {showDetailedBreakdown && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.4, ease: "circOut" }}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <CostItem 
+                      icon={DollarSign} 
+                      label="ACMI Hourly Rate" 
+                      value={acmiRate} 
+                      onChange={setAcmiRate}
+                      color="text-indigo-600"
+                      bg="bg-indigo-50 dark:bg-indigo-900/20"
+                      description="Base aircraft utilization fee covering crew, maintenance, and insurance."
+                    />
+                    <CostItem 
+                      icon={Fuel} 
+                      label="Fuel Consumption" 
+                      value={fuelCost} 
+                      onChange={setFuelCost}
+                      color="text-amber-600"
+                      bg="bg-amber-50 dark:bg-amber-900/20"
+                      description="Calculated based on estimated burn rate and localized fuel indices."
+                    />
+                    <CostItem 
+                      icon={Globe} 
+                      label="Overflight Charges" 
+                      value={overflightCharges} 
+                      onChange={setOverflightCharges}
+                      color="text-blue-600"
+                      bg="bg-blue-50 dark:bg-blue-900/20"
+                      description="Mandatory navigation fees across all traversed Flight Information Regions."
+                    />
+                    <CostItem 
+                      icon={Landmark} 
+                      label="Landing Fees" 
+                      value={landingFees} 
+                      onChange={setLandingFees}
+                      color="text-emerald-600"
+                      bg="bg-emerald-50 dark:bg-emerald-900/20"
+                      description="Airport regulatory charges for runway usage and terminal approach."
+                    />
+                    <CostItem 
+                      icon={Users} 
+                      label="Ground Handling" 
+                      value={handlingFees} 
+                      onChange={setHandlingFees}
+                      color="text-teal-600"
+                      bg="bg-teal-50 dark:bg-teal-900/20"
+                      description="Services including ramp support, towage, and baggage management."
+                    />
+                    <CostItem 
+                      icon={Calendar} 
+                      label="Parking Fees" 
+                      value={parkingFees} 
+                      onChange={setParkingFees}
+                      color="text-amber-700"
+                      bg="bg-amber-50 dark:bg-amber-900/20"
+                      description="Fees for stationing the aircraft at terminal or cargo stands."
+                    />
+                    <CostItem 
+                      icon={UserCheck} 
+                      label="Crew Duty Cost" 
+                      value={crewDutyCost} 
+                      onChange={setCrewDutyCost}
+                      color="text-rose-600"
+                      bg="bg-rose-50 dark:bg-rose-900/20"
+                      description="Hotels, per diems, and transport for the flight deck and cabin crew."
+                    />
+                    <CostItem 
+                      icon={MapPin} 
+                      label="Positioning Cost" 
+                      value={positioningCost} 
+                      onChange={setPositioningCost}
+                      color="text-indigo-600"
+                      bg="bg-indigo-50 dark:bg-indigo-900/20"
+                      description="Operational cost to move the aircraft to the mission start location."
+                    />
+                    <div className="p-6 rounded-3xl border border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm col-span-1 md:col-span-2 lg:col-span-1">
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-cyan-50 dark:bg-cyan-900/20 text-cyan-600 rounded-xl flex items-center justify-center">
+                            <ShieldCheck size={20} />
+                          </div>
+                          <p className="text-xs font-black text-gray-800 dark:text-white uppercase tracking-widest">Insurance Risk Layer</p>
+                        </div>
+                      </div>
+                      <div className="relative">
+                        <span className="absolute left-3 top-2.5 text-gray-400 font-bold">x</span>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          value={isNaN(insuranceMultiplier) ? '' : insuranceMultiplier}
+                          onChange={(e) => setInsuranceMultiplier(parseFloat(e.target.value) || 1)}
+                          className="w-full pl-8 p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:text-white text-lg font-black"
+                        />
+                        <p className="text-[10px] text-gray-400 font-bold uppercase mt-2">
+                          Impact: +${(operationalSum * (insuranceMultiplier - 1)).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="p-6 rounded-3xl border border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm relative overflow-hidden group">
+                      <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
+                        <Users size={60} />
+                      </div>
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-pink-50 dark:bg-pink-900/20 text-pink-600 rounded-xl flex items-center justify-center">
+                            <Users size={20} />
+                          </div>
+                          <div>
+                            <p className="text-xs font-black text-gray-800 dark:text-white uppercase tracking-widest">Catering Costs</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <div className="relative">
+                          <span className="absolute left-3 top-2.5 text-gray-400 font-bold">$</span>
+                          <input 
+                            type="number" 
+                            value={isNaN(cateringCost) ? '' : cateringCost}
+                            onChange={(e) => setCateringCost(parseInt(e.target.value) || 0)}
+                            className="w-full pl-8 p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:text-white text-lg font-black"
+                          />
+                        </div>
+                        <p className="text-[10px] text-gray-400 font-bold uppercase mt-2">Passenger nutrition services</p>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
               )}
+            </AnimatePresence>
 
-              <div className="text-2xl font-black opacity-50">=</div>
-
-              <div className="bg-white text-indigo-600 p-6 rounded-3xl shadow-2xl">
-                <p className="text-[10px] font-black uppercase tracking-widest mb-1">Total Cost</p>
-                <p className="text-3xl font-black">${totalCost.toLocaleString()}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Detailed Breakdown Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <CostItem 
-              icon={DollarSign} 
-              label="ACMI Hourly Rate" 
-              value={acmiRate} 
-              onChange={setAcmiRate}
-              color="text-indigo-600"
-              bg="bg-indigo-50 dark:bg-indigo-900/20"
-            />
-            <CostItem 
-              icon={Fuel} 
-              label="Fuel Consumption" 
-              value={fuelCost} 
-              onChange={setFuelCost}
-              color="text-amber-600"
-              bg="bg-amber-50 dark:bg-amber-900/20"
-            />
-            <CostItem 
-              icon={Globe} 
-              label="Overflight Charges" 
-              value={overflightCharges} 
-              onChange={setOverflightCharges}
-              color="text-blue-600"
-              bg="bg-blue-50 dark:bg-blue-900/20"
-            />
-            <CostItem 
-              icon={Landmark} 
-              label="Landing Fees" 
-              value={landingFees} 
-              onChange={setLandingFees}
-              color="text-emerald-600"
-              bg="bg-emerald-50 dark:bg-emerald-900/20"
-            />
-            <CostItem 
-              icon={Users} 
-              label="Ground Handling" 
-              value={handlingFees} 
-              onChange={setHandlingFees}
-              color="text-teal-600"
-              bg="bg-teal-50 dark:bg-teal-900/20"
-            />
-            <CostItem 
-              icon={Calendar} 
-              label="Parking Fees" 
-              value={parkingFees} 
-              onChange={setParkingFees}
-              color="text-amber-700"
-              bg="bg-amber-50 dark:bg-amber-900/20"
-            />
-            <CostItem 
-              icon={UserCheck} 
-              label="Crew Duty Cost" 
-              value={crewDutyCost} 
-              onChange={setCrewDutyCost}
-              color="text-rose-600"
-              bg="bg-rose-50 dark:bg-rose-900/20"
-            />
-            <CostItem 
-              icon={MapPin} 
-              label="Positioning Cost" 
-              value={positioningCost} 
-              onChange={setPositioningCost}
-              color="text-indigo-600"
-              bg="bg-indigo-50 dark:bg-indigo-900/20"
-            />
-            <div className={`p-6 rounded-3xl border border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm col-span-1 md:col-span-2 lg:col-span-1`}>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 bg-cyan-50 dark:bg-cyan-900/20 text-cyan-600 rounded-xl flex items-center justify-center`}>
-                    <ShieldCheck size={20} />
-                  </div>
-                  <p className="text-xs font-black text-gray-800 dark:text-white uppercase tracking-widest">Insurance Risk Layer</p>
-                </div>
-              </div>
-              <div className="relative">
-                <span className="absolute left-3 top-2.5 text-gray-400 font-bold">x</span>
-                <input 
-                  type="number" 
-                  step="0.01"
-                  value={isNaN(insuranceMultiplier) ? '' : insuranceMultiplier}
-                  onChange={(e) => setInsuranceMultiplier(parseFloat(e.target.value) || 1)}
-                  className="w-full pl-8 p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:text-white text-lg font-black"
-                />
-                <p className="text-[10px] text-gray-400 font-bold uppercase mt-2">
-                  Multiplied Impact: +${(operationalSum * (insuranceMultiplier - 1)).toLocaleString()}
-                </p>
-              </div>
-            </div>
-            <div className="p-6 rounded-3xl border border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-orange-50 dark:bg-orange-900/20 text-orange-600 rounded-xl flex items-center justify-center">
-                    <AlertTriangle size={20} />
-                  </div>
-                  <div>
-                    <p className="text-xs font-black text-gray-800 dark:text-white uppercase tracking-widest">Contingency Buffer ({contingencyPercent}%)</p>
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-4">
-                <div className="relative">
-                  <span className="absolute left-3 top-2.5 text-gray-400 font-bold">$</span>
-                  <input 
-                    type="number" 
-                    value={isNaN(contingency) ? '' : contingency}
-                    onChange={(e) => setContingency(parseInt(e.target.value) || 0)}
-                    className="w-full pl-8 p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:text-white text-lg font-black"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <input 
-                    type="range" 
-                    min="1" 
-                    max="10" 
-                    step="0.5"
-                    value={contingencyPercent}
-                    onChange={(e) => {
-                      const p = parseFloat(e.target.value);
-                      setContingencyPercent(p);
-                      const subtotal = operationalSum * insuranceMultiplier;
-                      const pDecimal = p / 100;
-                      setContingency(Math.round((subtotal + brokerMargin) * pDecimal));
-                    }}
-                    className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-orange-600"
-                  />
-                  <div className="flex justify-between text-[9px] font-bold text-gray-400 uppercase">
-                    <span>1%</span>
-                    <span>5%</span>
-                    <span>10%</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
             <div className="p-6 rounded-3xl border border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm relative overflow-hidden group">
               <div className="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
                 <TrendingUp size={60} />
@@ -1168,9 +1264,8 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
                 </div>
               </div>
             </div>
-          </div>
 
-          {engineResult && (
+            {engineResult && (
             <div className="bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/50 p-6 rounded-3xl space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -1433,7 +1528,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
               )}
             </div>
           )}
-        </>
+        </React.Fragment>
       )}
         </div>
       </div>
@@ -1441,18 +1536,18 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
   );
 }
 
-function CostItem({ icon: Icon, label, value, onChange, color, bg }: any) {
+function CostItem({ icon: Icon, label, value, onChange, color, bg, description }: any) {
   return (
-    <div className={`p-6 rounded-3xl border border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm`}>
+    <div className={`p-6 rounded-3xl border border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm transition-all hover:shadow-md group`}>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 ${bg} ${color} rounded-xl flex items-center justify-center`}>
+          <div className={`w-10 h-10 ${bg} ${color} rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform`}>
             <Icon size={20} />
           </div>
           <p className="text-xs font-black text-gray-800 dark:text-white uppercase tracking-widest">{label}</p>
         </div>
       </div>
-      <div className="relative">
+      <div className="relative mb-3">
         <span className="absolute left-3 top-2.5 text-gray-400 font-bold">$</span>
         <input 
           type="number" 
@@ -1461,6 +1556,7 @@ function CostItem({ icon: Icon, label, value, onChange, color, bg }: any) {
           className="w-full pl-8 p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:text-white text-lg font-black"
         />
       </div>
+      {description && <p className="text-[9px] text-gray-400 font-bold uppercase tracking-tight leading-relaxed">{description}</p>}
     </div>
   );
 }

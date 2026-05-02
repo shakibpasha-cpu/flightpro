@@ -43,6 +43,9 @@
         "phone": { "type": "string" },
         "founded_year": { "type": "integer" },
         "fleet_size": { "type": "integer" },
+        "fleet_quantity": { "type": "integer" },
+        "avg_fleet_age": { "type": "number" },
+        "aircraft_types_operated": { "type": "array", "items": { "type": "string" } },
         "lastContacted": { "type": "string", "format": "date-time" },
         "manual_notes": { "type": "string" }
       },
@@ -69,6 +72,9 @@
         "source": { "type": "string" },
         "last_updated": { "type": "string", "format": "date-time" },
         "fleet_size": { "type": "integer" },
+        "fleet_quantity": { "type": "integer" },
+        "avg_fleet_age": { "type": "number" },
+        "aircraft_types_operated": { "type": "array", "items": { "type": "string" } },
         "priority_score": { "type": "number" },
         "lastContacted": { "type": "string", "format": "date-time" },
         "relationship_status": { "type": "string", "enum": ["Strong", "Warm", "Cold", "No Contact"] },
@@ -176,16 +182,37 @@
       },
       "required": ["airport", "fuel_price_per_kg"]
     },
-    "FIRCharge": {
-      "title": "FIRCharge",
-      "description": "Overflight charges per country or FIR.",
+    "FIRData": {
+      "title": "FIRData",
+      "description": "Comprehensive Flight Information Region (FIR) data including charges and rules.",
       "type": "object",
       "properties": {
+        "code": { "type": "string", "description": "4-letter ICAO code" },
+        "name": { "type": "string" },
         "country": { "type": "string" },
-        "charge_per_km": { "type": "number" },
-        "weight_factor": { "type": "number" }
+        "overflightCharge": { "type": "number", "description": "Overflight charge in USD" },
+        "navigationCharge": { "type": "number", "description": "Navigation/Terminal charge in USD" },
+        "rules": { "type": "string", "description": "Operational rules and restrictions" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "website": { "type": "string" },
+        "sop": { "type": "string", "description": "Standard Operating Procedures" },
+        "documentationUrl": { "type": "string" },
+        "polygon": { 
+          "type": "array", 
+          "items": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "description": "Array of [lat, lng] coordinates forming the FIR boundary"
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["country", "charge_per_km"]
+      "required": ["code", "name", "country"]
     },
     "AirportCharge": {
       "title": "AirportCharge",
@@ -264,6 +291,9 @@
         "airport": { "type": "string" },
         "services": { "type": "array", "items": { "type": "string" } },
         "contact": { "type": "string" },
+        "phone": { "type": "string" },
+        "website": { "type": "string" },
+        "preferred": { "type": "boolean", "default": false },
         "rating": { "type": "number" },
         "aircraftRates": {
           "type": "array",
@@ -379,9 +409,102 @@
         "notes": { "type": "string" }
       },
       "required": ["aircraft_listing_id", "departure", "destination", "date", "duration_hours"]
+    },
+    "Airport": {
+      "title": "Airport",
+      "description": "Comprehensive airport information including technical data, charges, and user-defined ratings/notes.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "icao": { "type": "string", "description": "4-letter ICAO code" },
+        "iata": { "type": "string", "description": "3-letter IATA code" },
+        "city": { "type": "string" },
+        "country": { "type": "string" },
+        "runwayLength": { "type": "number" },
+        "elevation": { "type": "number" },
+        "fuelAvailability": { "type": "array", "items": { "type": "string" } },
+        "atisFrequency": { "type": "string" },
+        "parkingSpots": { "type": "number" },
+        "fuelRate": { "type": "number" },
+        "landingFee": { "type": "number" },
+        "parkingFee": { "type": "number" },
+        "handlingFee": { "type": "number" },
+        "terminalNavigationFee": { "type": "number" },
+        "cateringFee": { "type": "number" },
+        "groundTransportFee": { "type": "number" },
+        "deicingFee": { "type": "number" },
+        "handlingAvailable": { "type": "boolean" },
+        "handlingStatus": { "type": "string" },
+        "rating": { "type": "number", "minimum": 1, "maximum": 5 },
+        "internalNotes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "icao", "country"]
+    },
+    "AIIntelligenceCache": {
+      "title": "AIIntelligenceCache",
+      "description": "Generic cache for AI-generated intelligence (Availability, Operator details, Plan analysis).",
+      "type": "object",
+      "properties": {
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["updatedAt"]
+    },
+    "Aircraft": {
+      "title": "Aircraft",
+      "description": "Individual aircraft record with technical specs and rates.",
+      "type": "object",
+      "properties": {
+        "registration": { "type": "string" },
+        "icao24": { "type": "string" },
+        "type": { "type": "string" },
+        "manufacturer": { "type": "string" },
+        "fuelBurnPerHour": { "type": "number" },
+        "cruiseSpeed": { "type": "number" },
+        "range": { "type": "number" },
+        "mtow": { "type": "number" },
+        "runwayRequired": { "type": "number" },
+        "maxPayload": { "type": "number" },
+        "maxPassengers": { "type": "integer" },
+        "takeoffDistance": { "type": "number" },
+        "landingDistance": { "type": "number" },
+        "hourlyRate": { "type": "number" },
+        "category": { "type": "string" },
+        "landingFee": { "type": "number" },
+        "handlingFee": { "type": "number" },
+        "parkingFee": { "type": "number" },
+        "maintenanceReserve": { "type": "number" },
+        "crewCostPerHour": { "type": "number" },
+        "generalSpecs": { "type": "string" },
+        "specs": { "type": "string" },
+        "ai_verified": { "type": "boolean" },
+        "operatorName": { "type": "string" },
+        "acmiRate": { "type": "number" },
+        "dynamicPricing": { "type": "boolean", "default": false, "description": "Enable dynamic adjustments based on demand/urgency" }
+      },
+      "required": ["registration", "type"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Critical alerts for users regarding delays, weather, or airspace warnings.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["info", "warning", "critical", "success"] },
+        "status": { "type": "string", "enum": ["unread", "read", "dismissed"] },
+        "relatedId": { "type": "string", "description": "ID of related entity like flight plan" },
+        "category": { "type": "string", "enum": ["delay", "weather", "airspace", "technical", "system"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "message", "type", "status", "createdAt"]
     }
   },
   "firestore": {
+    "/notifications/{id}": { "schema": { "$ref": "Notification" }, "description": "User notifications" },
+    "/aircraft/{id}": { "schema": { "$ref": "Aircraft" }, "description": "Individual aircraft details" },
     "/aircraft_master/{id}": { "schema": { "$ref": "AircraftMaster" }, "description": "Static aircraft technical data" },
     "/operators/{id}": { "schema": { "$ref": "Operator" }, "description": "Operator database" },
     "/operators_master/{id}": { "schema": { "$ref": "OperatorMaster" }, "description": "Comprehensive global operator database" },
@@ -392,8 +515,9 @@
     "/availability/{id}": { "schema": { "$ref": "Availability" }, "description": "Aircraft availability tracking" },
     "/pricing_adjustments/{id}": { "schema": { "$ref": "PricingAdjustment" }, "description": "Dynamic pricing rules" },
     "/fuel_prices/{airport}": { "schema": { "$ref": "FuelPrice" }, "description": "Fuel pricing database" },
-    "/fir_charges/{id}": { "schema": { "$ref": "FIRCharge" }, "description": "Overflight charges database" },
+    "/firs/{id}": { "schema": { "$ref": "FIRData" }, "description": "Comprehensive overflight and navigation charges database" },
     "/airport_charges/{airport}": { "schema": { "$ref": "AirportCharge" }, "description": "Airport fees database" },
+    "/airports/{id}": { "schema": { "$ref": "Airport" }, "description": "Comprehensive airport database" },
     "/crew_costs/{id}": { "schema": { "$ref": "CrewCost" }, "description": "Crew cost estimates" },
     "/insurance_rules/{id}": { "schema": { "$ref": "InsuranceRule" }, "description": "Insurance surcharges" },
     "/ai_predictions/{id}": { "schema": { "$ref": "AIPrediction" }, "description": "AI predictions" },
@@ -404,7 +528,10 @@
     "/crew_members/{id}": { "schema": { "$ref": "CrewMember" }, "description": "Crew member database" },
     "/duty_logs/{id}": { "schema": { "$ref": "DutyLog" }, "description": "Duty time logs" },
     "/flight_plans/{id}": { "schema": { "$ref": "FlightPlan" }, "description": "Multi-leg flight plans" },
-    "/flight_logs/{id}": { "schema": { "$ref": "FlightLog" }, "description": "Historical flight logs for aircraft" }
+    "/flight_logs/{id}": { "schema": { "$ref": "FlightLog" }, "description": "Historical flight logs for aircraft" },
+    "/availability_intelligence/{id}": { "schema": { "$ref": "AIIntelligenceCache" }, "description": "AI aircraft availability cache" },
+    "/operator_enrichment/{id}": { "schema": { "$ref": "AIIntelligenceCache" }, "description": "AI operator data enrichment cache" },
+    "/plan_analysis_cache/{id}": { "schema": { "$ref": "AIIntelligenceCache" }, "description": "AI flight plan analysis cache" }
   }
 }
 

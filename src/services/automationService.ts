@@ -1,5 +1,6 @@
 import { db, auth } from '../firebase';
 import { collection, addDoc, getDocs, query, where, updateDoc, doc } from 'firebase/firestore';
+import { safeStringify } from '../utils/safeJson';
 
 export interface AutomationTask {
   id?: string;
@@ -58,7 +59,7 @@ export const automationService = {
           const response = await fetch('/api/scrape-authority', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
+            body: safeStringify({ url })
           });
 
           if (!response.ok) throw new Error(`Failed to scrape ${url}`);

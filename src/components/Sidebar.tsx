@@ -35,45 +35,75 @@ interface SidebarProps {
 export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'advanced-quote', label: 'Advanced Quote', icon: Zap },
-    { id: 'multileg-planner', label: 'Multi-Leg Planner', icon: MapPin },
-    { id: 'booking-flow', label: 'Booking Wizard', icon: Plane },
-    { id: 'ai-intelligence', label: 'AI Intelligence', icon: Sparkles },
-    { id: 'optimizer', label: 'Route Optimizer', icon: Zap },
-    { id: 'quotes', label: 'Charter Quotes', icon: Zap },
-    { id: 'acmi', label: 'ACMI Marketplace', icon: Globe },
-    { id: 'acmi-pricing', label: 'ACMI Pricing Engine', icon: Calculator },
-    { id: 'database', label: 'ACMI Database', icon: Database },
-    { id: 'aoc-database', label: 'AOC Database', icon: Database },
-    { id: 'aoc-scraper', label: 'AOC Scraper Engine', icon: Cpu },
-    { id: 'aoc-sources', label: 'AOC Source Directory', icon: Globe },
-    { id: 'authority-intelligence', label: 'Authority Intelligence', icon: ShieldCheck },
-    { id: 'availability-intelligence', label: 'Availability Intelligence', icon: Sparkles },
-    { id: 'tracking', label: 'Live Fleet Tracking', icon: Activity },
-    { id: 'automation', label: 'Native Automation', icon: Webhook },
-    { id: 'scraper', label: 'Market Scraper', icon: Globe },
-    { id: 'intelligence', label: 'Market Intelligence', icon: BarChart3 },
-    { id: 'planner', label: 'AI Planner', icon: Sparkles },
-    { id: 'manual', label: 'Manual Quote', icon: PlusCircle },
-    { id: 'emptylegs', label: 'Empty Legs', icon: Wind },
-    { id: 'leads', label: 'Leads & CRM', icon: Users },
-    { id: 'billing', label: 'Billing & Plans', icon: CreditCard },
-    { id: 'operators', label: 'Operator Network', icon: Building2 },
-    { id: 'aircraft', label: 'Aircraft Fleet', icon: Plane },
-    { id: 'availability', label: 'Availability', icon: Calendar },
-    { id: 'airports', label: 'Airports', icon: MapPin },
-    { id: 'firs', label: 'FIR Database', icon: Globe },
-    { id: 'routes', label: 'Routes', icon: Globe },
-    { id: 'schedules', label: 'Schedules', icon: Calendar },
-    { id: 'handling', label: 'Handling Agents', icon: Building2 },
-    { id: 'reports', label: 'Analytics', icon: BarChart3 },
-    { id: 'feasibility', label: 'Feasibility Report', icon: TrendingUp },
-    { id: 'pricing', label: 'Pricing Engine', icon: Settings },
-    { id: 'pricing-rules', label: 'Pricing Rules', icon: Settings },
-    { id: 'history', label: 'History', icon: History },
-    { id: 'pitch-deck', label: 'Investor Pitch Deck', icon: BarChart3 },
+  const menuGroups = [
+    {
+      title: 'Operations',
+      items: [
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { id: 'multileg-planner', label: 'Multi-Leg Planner', icon: MapPin },
+        { id: 'advanced-quote', label: 'Advanced Quote', icon: Zap },
+        { id: 'tracking', label: 'Live Fleet Tracking', icon: Activity },
+        { id: 'booking-flow', label: 'Booking Wizard', icon: Plane },
+      ]
+    },
+    {
+      title: 'Intelligence',
+      items: [
+        { id: 'ai-intelligence', label: 'AI Intelligence', icon: Sparkles },
+        { id: 'optimizer', label: 'Route Optimizer', icon: Zap },
+        { id: 'availability-intelligence', label: 'Availability Intelligence', icon: Sparkles },
+        { id: 'authority-intelligence', label: 'Authority Intelligence', icon: ShieldCheck },
+        { id: 'intelligence', label: 'Market Intelligence', icon: BarChart3 },
+        { id: 'feasibility', label: 'Feasibility Report', icon: TrendingUp },
+      ]
+    },
+    {
+      title: 'ACMI & Marketplace',
+      items: [
+        { id: 'acmi', label: 'ACMI Marketplace', icon: Globe },
+        { id: 'acmi-pricing', label: 'ACMI Pricing Engine', icon: Calculator },
+        { id: 'emptylegs', label: 'Empty Legs', icon: Wind },
+      ]
+    },
+    {
+      title: 'Databases',
+      items: [
+        { id: 'database', label: 'ACMI Database', icon: Database },
+        { id: 'aoc-database', label: 'AOC Database', icon: Database },
+        { id: 'aoc-scraper', label: 'AOC Scraper Engine', icon: Cpu },
+        { id: 'aoc-sources', label: 'AOC Source Directory', icon: Globe },
+        { id: 'operators', label: 'Operator Network', icon: Building2 },
+        { id: 'aircraft', label: 'Aircraft Fleet', icon: Plane },
+        { id: 'airports', label: 'Airports', icon: MapPin },
+        { id: 'aeronautical-charts', label: 'Aeronautical Charts', icon: Globe },
+        { id: 'firs', label: 'FIR Database', icon: Globe },
+        { id: 'handling', label: 'Handling Agents', icon: Building2 },
+      ]
+    },
+    {
+      title: 'Systems & Data',
+      items: [
+        { id: 'automation', label: 'Automation', icon: Webhook },
+        { id: 'scraper', label: 'Market Scraper', icon: Globe },
+        { id: 'planner', label: 'AI Planner', icon: Sparkles },
+        { id: 'routes', label: 'Routes', icon: Globe },
+        { id: 'schedules', label: 'Schedules', icon: Calendar },
+        { id: 'availability', label: 'Availability', icon: Calendar },
+        { id: 'pricing', label: 'Pricing Engine', icon: Settings },
+        { id: 'pricing-rules', label: 'Pricing Rules', icon: Settings },
+      ]
+    },
+    {
+      title: 'Business',
+      items: [
+        { id: 'leads', label: 'Leads & CRM', icon: Users },
+        { id: 'billing', label: 'Billing & Plans', icon: CreditCard },
+        { id: 'quotes', label: 'Charter Quotes', icon: Zap },
+        { id: 'reports', label: 'Analytics', icon: BarChart3 },
+        { id: 'history', label: 'History', icon: History },
+        { id: 'pitch-deck', label: 'Investor Pitch Deck', icon: BarChart3 },
+      ]
+    }
   ];
 
   return (
@@ -103,21 +133,30 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
         </button>
       </div>
 
-      <nav className="flex-grow p-4 space-y-1 overflow-y-auto custom-scrollbar">
-        {menuItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => setActiveTab(item.id)}
-            title={isCollapsed ? item.label : ''}
-            className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
-              activeTab === item.id
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
-                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
-            } ${isCollapsed ? 'justify-center px-0' : ''}`}
-          >
-            <item.icon size={18} className="shrink-0" />
-            {!isCollapsed && <span className="whitespace-nowrap">{item.label}</span>}
-          </button>
+      <nav className="flex-grow p-4 space-y-6 overflow-y-auto custom-scrollbar">
+        {menuGroups.map((group) => (
+          <div key={group.title} className="space-y-1">
+            {!isCollapsed && (
+              <h2 className="px-4 py-2 text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+                {group.title}
+              </h2>
+            )}
+            {group.items.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                title={isCollapsed ? item.label : ''}
+                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                  activeTab === item.id
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100 dark:shadow-none'
+                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-white'
+                } ${isCollapsed ? 'justify-center px-0' : ''}`}
+              >
+                <item.icon size={18} className="shrink-0" />
+                {!isCollapsed && <span className="whitespace-nowrap">{item.label}</span>}
+              </button>
+            ))}
+          </div>
         ))}
       </nav>
 

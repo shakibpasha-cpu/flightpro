@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Plane, Plus, Trash2, Edit2, Save, X, Fuel, Zap, MapPin, Weight, Loader2, Search, Calendar, Sparkles, History, Clock, FileText } from 'lucide-react';
+import { Plane, Plus, Trash2, Edit2, Save, X, Fuel, Zap, MapPin, Weight, Loader2, Search, Calendar, Sparkles, History, Clock, FileText, Filter, Users, Activity, SlidersHorizontal } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where, orderBy, Timestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
 import { motion, AnimatePresence } from 'motion/react';
 import AircraftPerformanceCharts from './AircraftPerformanceCharts';
 import AircraftComparisonCharts from './AircraftComparisonCharts';
+import { getAircraftDetails } from '../services/aiService';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
 interface FlightLog {
@@ -18,6 +19,17 @@ interface FlightLog {
   notes?: string;
 }
 
+interface FlightSchedule {
+  id?: string;
+  aircraft_listing_id: string;
+  departure: string;
+  destination: string;
+  date: string;
+  etd: string;
+  eta: string;
+  crew_assignments: string;
+}
+
 interface Aircraft {
   id?: string;
   registration?: string;
@@ -25,12 +37,16 @@ interface Aircraft {
   type: string;
   fuelBurnPerHour: number | '';
   cruiseSpeed: number | '';
-  range: number | '';
   maxPayload: number | '';
   maxPassengers: number | '';
   takeoffDistance: number | '';
   landingDistance: number | '';
   hourlyRate: number | '';
+  manufacturer?: string;
+  range: number | '';
+  mtow?: number | '';
+  runwayRequired?: number | '';
+  generalSpecs?: string;
   category: string;
   landingFee: number | '';
   handlingFee: number | '';
@@ -43,7 +59,6 @@ interface Aircraft {
   ai_verified?: boolean;
   last_enhanced?: string;
   serviceCeiling?: number;
-  mtow?: number;
   // ACMI Specific Fields
   operatorName?: string;
   acmiRate?: number | '';
@@ -79,6 +94,9 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedForComparison, setSelectedForComparison] = useState<Aircraft[]>([]);
   const [showComparison, setShowComparison] = useState(false);
+  const [aiFetching, setAiFetching] = useState(false);
+  const [enhancingId, setEnhancingId] = useState<string | null>(null);
+  const [bulkEnhancing, setBulkEnhancing] = useState(false);
   const [flightHistoryCache, setFlightHistoryCache] = useState<Record<string, FlightLog[]>>({});
   const [loggingFlightId, setLoggingFlightId] = useState<string | null>(null);
   const [logFormData, setLogFormData] = useState<Omit<FlightLog, 'id' | 'aircraft_listing_id'>>({
@@ -88,13 +106,35 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
     duration_hours: 0,
     notes: ''
   });
+  
+  const [flightSchedulesCache, setFlightSchedulesCache] = useState<Record<string, FlightSchedule[]>>({});
+  const [schedulingFlightId, setSchedulingFlightId] = useState<string | null>(null);
+  const [scheduleFormData, setScheduleFormData] = useState<Omit<FlightSchedule, 'id' | 'aircraft_listing_id'>>({
+    departure: '',
+    destination: '',
+    date: new Date().toISOString().split('T')[0],
+    etd: '',
+    eta: '',
+    crew_assignments: ''
+  });
+  
+  // Filtering states
+  const [filterMinPax, setFilterMinPax] = useState<number | ''>('');
+  const [filterMinPayload, setFilterMinPayload] = useState<number | ''>('');
+  const [filterMinRange, setFilterMinRange] = useState<number | ''>('');
+  const [filterCategory, setFilterCategory] = useState<string>('All');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
   const [formData, setFormData] = useState<Aircraft>({
     registration: '',
     icao24: '',
     type: '',
+    manufacturer: '',
     fuelBurnPerHour: 0,
     cruiseSpeed: 0,
     range: 0,
+    mtow: 0,
+    runwayRequired: 0,
     maxPayload: 0,
     maxPassengers: 0,
     takeoffDistance: 0,
@@ -106,6 +146,8 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
     parkingFee: 0,
     maintenanceReserve: 0,
     crewCostPerHour: 0,
+    generalSpecs: '',
+    specs: '',
     operatorName: '',
     acmiRate: 0,
     availability: '',
@@ -153,6 +195,21 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
     }
   };
 
+  const fetchFlightSchedules = async (aircraftId: string) => {
+    try {
+      const q = query(
+        collection(db, 'aircraft_schedules'),
+        where('aircraft_listing_id', '==', aircraftId),
+        orderBy('date', 'desc')
+      );
+      const snapshot = await getDocs(q);
+      const schedules = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FlightSchedule));
+      setFlightSchedulesCache(prev => ({ ...prev, [aircraftId]: schedules }));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, 'aircraft_schedules');
+    }
+  };
+
   const handleLogFlight = async (aircraftId: string) => {
     setLoading(true);
     try {
@@ -177,9 +234,35 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
     }
   };
 
+  const handleLogSchedule = async (aircraftId: string) => {
+    setLoading(true);
+    try {
+      const newSchedule = {
+        ...scheduleFormData,
+        aircraft_listing_id: aircraftId
+      };
+      await addDoc(collection(db, 'aircraft_schedules'), newSchedule);
+      await fetchFlightSchedules(aircraftId);
+      setSchedulingFlightId(null);
+      setScheduleFormData({
+        departure: '',
+        destination: '',
+        date: new Date().toISOString().split('T')[0],
+        etd: '',
+        eta: '',
+        crew_assignments: ''
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'aircraft_schedules');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (expandedId) {
       fetchFlightHistory(expandedId);
+      fetchFlightSchedules(expandedId);
     }
   }, [expandedId]);
 
@@ -600,9 +683,12 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
         registration: '',
         icao24: '',
         type: '',
+        manufacturer: '',
         fuelBurnPerHour: 0,
         cruiseSpeed: 0,
         range: 0,
+        mtow: 0,
+        runwayRequired: 0,
         maxPayload: 0,
         maxPassengers: 0,
         takeoffDistance: 0,
@@ -614,6 +700,8 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
         parkingFee: 0,
         maintenanceReserve: 0,
         crewCostPerHour: 0,
+        generalSpecs: '',
+        specs: '',
         operatorName: '',
         acmiRate: 0,
         availability: '',
@@ -649,10 +737,140 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
     }
   };
 
-  const filteredAircraft = aircraft.filter(a => 
-    a.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    a.category.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleAIFetch = async (queryTerm: string) => {
+    if (!queryTerm) return;
+    setAiFetching(true);
+    try {
+      const details = await getAircraftDetails(queryTerm);
+      if (details) {
+        setFormData(prev => ({
+          ...prev,
+          type: details.type || prev.type,
+          category: details.category || prev.category,
+          fuelBurnPerHour: details.fuelBurnPerHour || prev.fuelBurnPerHour,
+          cruiseSpeed: details.cruiseSpeed || prev.cruiseSpeed,
+          range: details.range || prev.range,
+          maxPayload: details.maxPayload || prev.maxPayload,
+          maxPassengers: details.maxPassengers || prev.maxPassengers,
+          takeoffDistance: details.takeoffDistance || prev.takeoffDistance,
+          landingDistance: details.landingDistance || prev.landingDistance,
+          hourlyRate: details.hourlyRate || prev.hourlyRate,
+          landingFee: details.landingFee || prev.landingFee,
+          handlingFee: details.handlingFee || prev.handlingFee,
+          parkingFee: details.parkingFee || prev.parkingFee,
+          maintenanceReserve: details.maintenanceReserve || prev.maintenanceReserve,
+          crewCostPerHour: details.crewCostPerHour || prev.crewCostPerHour,
+          serviceCeiling: details.serviceCeiling || prev.serviceCeiling,
+          mtow: details.mtow || prev.mtow,
+          manufacturer: details.manufacturer || prev.manufacturer,
+          runwayRequired: details.runwayRequired || prev.runwayRequired,
+          generalSpecs: details.generalSpecs || prev.generalSpecs,
+          specs: details.specs || prev.specs,
+          ai_verified: true
+        }));
+        setShowAddForm(true);
+      } else {
+        alert("Could not fetch details for this aircraft. Please enter them manually.");
+      }
+    } catch (error) {
+      console.error("AI Fetch Error:", error);
+      alert("AI Service error. Please try again later.");
+    } finally {
+      setAiFetching(false);
+    }
+  };
+
+  const handleEnhanceAircraft = async (aircraftItem: Aircraft, silent: boolean = false) => {
+    if (!aircraftItem.id) return false;
+    
+    setEnhancingId(aircraftItem.id);
+    try {
+      const details = await getAircraftDetails(aircraftItem.type);
+      if (details) {
+        const updatedData: Partial<Aircraft> = { ...aircraftItem };
+        let updatedCount = 0;
+        
+        const fillableFields = [
+          'category', 'fuelBurnPerHour', 'cruiseSpeed', 'range', 'maxPayload', 
+          'maxPassengers', 'takeoffDistance', 'landingDistance', 'hourlyRate', 
+          'landingFee', 'handlingFee', 'parkingFee', 'maintenanceReserve', 
+          'crewCostPerHour', 'serviceCeiling', 'mtow', 'manufacturer', 
+          'runwayRequired', 'generalSpecs', 'specs'
+        ] as const;
+        
+        fillableFields.forEach(field => {
+          if (details[field] && (!updatedData[field] || updatedData[field] === 0 || updatedData[field] === '')) {
+            (updatedData as any)[field] = details[field];
+            updatedCount++;
+          }
+        });
+        
+        if (updatedCount > 0) {
+          updatedData.ai_verified = true;
+          updatedData.last_enhanced = new Date().toISOString();
+          await updateDoc(doc(db, 'aircraft', aircraftItem.id), updatedData as any);
+          if (!silent) await fetchAircraft();
+          return true;
+        } else {
+          if (!silent) alert(`Database already has complete details for ${aircraftItem.type}.`);
+          // Still mark as verified if we checked it and it was complete enough
+          await updateDoc(doc(db, 'aircraft', aircraftItem.id), { ai_verified: true });
+          if (!silent) await fetchAircraft();
+          return false;
+        }
+      } else {
+        if (!silent) alert("Could not fetch details from AI. Try again later.");
+        return false;
+      }
+    } catch (error) {
+      if (!silent) handleFirestoreError(error, OperationType.UPDATE, 'aircraft');
+      return false;
+    } finally {
+      setEnhancingId(null);
+    }
+  };
+
+  const handleBulkEnhanceFleet = async () => {
+    if (aircraft.length === 0) return;
+    const candidates = aircraft.filter(a => !a.ai_verified);
+    
+    if (candidates.length === 0) {
+      alert("All aircraft in your fleet are already AI-verified and fully detailed!");
+      return;
+    }
+
+    if (!confirm(`Found ${candidates.length} aircraft missing deep verification. Start bulk enhancement? (This may take a moment)`)) return;
+
+    setBulkEnhancing(true);
+    let successCount = 0;
+    
+    for (const a of candidates) {
+      try {
+        const enhanced = await handleEnhanceAircraft(a, true);
+        if (enhanced) successCount++;
+      } catch (err) {
+        console.error(`Failed to enhance ${a.type}`, err);
+      }
+    }
+    
+    setBulkEnhancing(false);
+    await fetchAircraft();
+    alert(`Bulk enhancements complete! Successfully updated ${successCount} aircraft records.`);
+  };
+
+  const filteredAircraft = aircraft.filter(a => {
+    const matchesSearch = 
+      a.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (a.registration || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      a.category.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesPax = filterMinPax === '' || (Number(a.maxPassengers) || 0) >= Number(filterMinPax);
+    const matchesPayload = filterMinPayload === '' || (Number(a.maxPayload) || 0) >= Number(filterMinPayload);
+    const matchesRange = filterMinRange === '' || (Number(a.range) || 0) >= Number(filterMinRange);
+    const matchesCategory = filterCategory === 'All' || a.category === filterCategory;
+
+    return matchesSearch && matchesPax && matchesPayload && matchesRange && matchesCategory;
+  });
 
   return (
     <div className="space-y-6">
@@ -662,6 +880,17 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
           <p className="text-sm text-gray-500 dark:text-gray-400">Manage your private jet and cargo fleet performance data.</p>
         </div>
         <div className="flex gap-2">
+          {aircraft.filter(a => !a.ai_verified).length > 0 && (
+            <button
+              onClick={handleBulkEnhanceFleet}
+              disabled={bulkEnhancing || loading || aircraft.length === 0}
+              className="bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition border border-emerald-100 dark:border-emerald-800 disabled:opacity-50"
+              title="Automatically fetch missing specs for all unverified aircraft"
+            >
+              {bulkEnhancing ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+              {bulkEnhancing ? 'Enhancing...' : 'Fix Missing Specs'}
+            </button>
+          )}
           <button
             onClick={seedData}
             disabled={loading}
@@ -712,13 +941,53 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Aircraft Type</label>
+                <div className="relative">
+                  <input
+                    required
+                    type="text"
+                    placeholder="e.g. Gulfstream G650"
+                    className="w-full p-2 pr-10 border dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg"
+                    value={formData.type}
+                    onChange={e => setFormData({ ...formData, type: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAIFetch(formData.type)}
+                    disabled={aiFetching || !formData.type}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-indigo-500 hover:text-indigo-600 transition-colors disabled:opacity-50"
+                    title="Fetch details with AI"
+                  >
+                    {aiFetching ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Manufacturer</label>
                 <input
-                  required
                   type="text"
-                  placeholder="e.g. Gulfstream G650"
+                  placeholder="e.g. Gulfstream"
                   className="w-full p-2 border dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg"
-                  value={formData.type}
-                  onChange={e => setFormData({ ...formData, type: e.target.value })}
+                  value={formData.manufacturer}
+                  onChange={e => setFormData({ ...formData, manufacturer: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">MTOW (kg)</label>
+                <input
+                  type="number"
+                  className="w-full p-2 border dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg"
+                  value={formData.mtow}
+                  onChange={e => setFormData({ ...formData, mtow: e.target.value === '' ? '' : Number(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Runway Required (m)</label>
+                <input
+                  type="number"
+                  placeholder="Min length in meters"
+                  className="w-full p-2 border dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg"
+                  value={formData.runwayRequired}
+                  onChange={e => setFormData({ ...formData, runwayRequired: e.target.value === '' ? '' : Number(e.target.value) })}
                 />
               </div>
               <div className="space-y-1">
@@ -980,6 +1249,25 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
                 />
               </div>
 
+              <div className="space-y-1 md:col-span-2">
+                <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">General Specs (Overview)</label>
+                <textarea
+                  className="w-full p-2 border dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg"
+                  value={formData.generalSpecs}
+                  onChange={e => setFormData({ ...formData, generalSpecs: e.target.value })}
+                  placeholder="Technical overview and highlights..."
+                />
+              </div>
+              <div className="space-y-1 md:col-span-1">
+                <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Full Specs (Markdown/List)</label>
+                <textarea
+                  className="w-full p-2 border dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg"
+                  value={formData.specs}
+                  onChange={e => setFormData({ ...formData, specs: e.target.value })}
+                  placeholder="Detailed equipment and avionics..."
+                />
+              </div>
+
               {/* ACMI Lease Specific Fields */}
               <div className="md:col-span-3 pt-4 border-t border-gray-100 dark:border-gray-700">
                 <h4 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-widest mb-4">ACMI Lease Terms</h4>
@@ -1040,12 +1328,133 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" size={20} />
         <input
           type="text"
-          placeholder="Search fleet by type or category..."
-          className="w-full pl-12 p-4 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl shadow-sm focus:border-indigo-500 dark:focus:border-indigo-500 dark:text-white transition-all"
+          placeholder="Search fleet or type full model for AI fetch (e.g. Challenger 350)..."
+          className="w-full pl-12 pr-40 p-4 bg-white dark:bg-gray-800 border-2 border-transparent focus:border-indigo-500 rounded-2xl shadow-sm dark:text-white transition-all outline-none"
           value={searchTerm}
           onChange={e => setSearchTerm(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && searchTerm.length > 3) {
+              handleAIFetch(searchTerm);
+            }
+          }}
         />
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+          <button
+            onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+            className={`p-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+              showAdvancedFilters 
+                ? 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300' 
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+            }`}
+          >
+            <SlidersHorizontal size={14} />
+            Filters
+          </button>
+          {aiFetching ? (
+            <div className="flex items-center gap-1.5 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl text-xs font-black uppercase">
+              <Loader2 className="animate-spin" size={14} />
+              AI Fetching...
+            </div>
+          ) : (
+            <button
+              onClick={() => handleAIFetch(searchTerm)}
+              disabled={searchTerm.length < 3}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-700 transition flex items-center gap-2 disabled:opacity-50 disabled:grayscale"
+            >
+              <Sparkles size={14} />
+              AI Fetch
+            </button>
+          )}
+        </div>
       </div>
+
+      <AnimatePresence>
+        {showAdvancedFilters && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <Plane size={14} className="text-gray-400" />
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Category</label>
+                </div>
+                <select
+                  className="w-full p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl text-xs font-bold focus:ring-2 focus:ring-indigo-500 dark:text-white"
+                  value={filterCategory}
+                  onChange={e => setFilterCategory(e.target.value)}
+                >
+                  <option value="All">All Categories</option>
+                  <option>Light Jet</option>
+                  <option>Midsize Jet</option>
+                  <option>Heavy Jet</option>
+                  <option>Cargo</option>
+                  <option>Turboprop</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <Users size={14} className="text-gray-400" />
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Min Passengers</label>
+                </div>
+                <input
+                  type="number"
+                  placeholder="e.g. 10"
+                  className="w-full p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl text-xs font-bold focus:ring-2 focus:ring-indigo-500 dark:text-white"
+                  value={filterMinPax === '' ? '' : filterMinPax}
+                  onChange={e => setFilterMinPax(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <Weight size={14} className="text-gray-400" />
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Min Payload (kg)</label>
+                </div>
+                <input
+                  type="number"
+                  placeholder="e.g. 5000"
+                  className="w-full p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl text-xs font-bold focus:ring-2 focus:ring-indigo-500 dark:text-white"
+                  value={filterMinPayload === '' ? '' : filterMinPayload}
+                  onChange={e => setFilterMinPayload(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <Activity size={14} className="text-gray-400" />
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Min Range (nm)</label>
+                </div>
+                <input
+                  type="number"
+                  placeholder="e.g. 3000"
+                  className="w-full p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl text-xs font-bold focus:ring-2 focus:ring-indigo-500 dark:text-white"
+                  value={filterMinRange === '' ? '' : filterMinRange}
+                  onChange={e => setFilterMinRange(e.target.value === '' ? '' : Number(e.target.value))}
+                />
+              </div>
+
+              <div className="md:col-span-4 flex justify-end">
+                <button
+                  onClick={() => {
+                    setFilterMinPax('');
+                    setFilterMinPayload('');
+                    setFilterMinRange('');
+                    setFilterCategory('All');
+                  }}
+                  className="text-xs font-bold text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                >
+                  Reset Filters
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {showComparison && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -1173,6 +1582,14 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
               </div>
               <div className="flex gap-2">
                 <button 
+                  onClick={() => handleEnhanceAircraft(a)}
+                  disabled={enhancingId === a.id}
+                  className="p-2 text-indigo-400 dark:text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-all"
+                  title="Auto-fill missing details with AI"
+                >
+                  {enhancingId === a.id ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+                </button>
+                <button 
                   onClick={() => {
                     setEditingId(a.id!);
                     setFormData(a);
@@ -1227,6 +1644,33 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
                 </div>
                 <p className="text-sm font-bold text-gray-700 dark:text-gray-300">{a.maxPassengers} seats</p>
               </div>
+              {a.manufacturer && (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-gray-400 dark:text-gray-500">
+                    <Plane size={14} />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Manufacturer</span>
+                  </div>
+                  <p className="text-sm font-bold text-gray-700 dark:text-gray-300 truncate">{a.manufacturer}</p>
+                </div>
+              )}
+              {a.mtow && (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-gray-400 dark:text-gray-500">
+                    <Weight size={14} />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">MTOW</span>
+                  </div>
+                  <p className="text-sm font-bold text-gray-700 dark:text-gray-300">{Number(a.mtow).toLocaleString()} kg</p>
+                </div>
+              )}
+              {a.runwayRequired && (
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1.5 text-gray-400 dark:text-gray-500">
+                    <Activity size={14} />
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Runway Req</span>
+                  </div>
+                  <p className="text-sm font-bold text-gray-700 dark:text-gray-300">{a.runwayRequired} m</p>
+                </div>
+              )}
               {a.serviceCeiling && (
                 <div className="space-y-1">
                   <div className="flex items-center gap-1.5 text-gray-400 dark:text-gray-500">
@@ -1236,19 +1680,10 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
                   <p className="text-sm font-bold text-gray-700 dark:text-gray-300">{a.serviceCeiling.toLocaleString()} ft</p>
                 </div>
               )}
-              {a.mtow && (
-                <div className="space-y-1">
-                  <div className="flex items-center gap-1.5 text-gray-400 dark:text-gray-500">
-                    <Weight size={14} />
-                    <span className="text-[10px] font-bold uppercase tracking-wider">MTOW</span>
-                  </div>
-                  <p className="text-sm font-bold text-gray-700 dark:text-gray-300">{a.mtow.toLocaleString()} kg</p>
-                </div>
-              )}
               <div className="space-y-1">
                 <div className="flex items-center gap-1.5 text-gray-400 dark:text-gray-500">
                   <Zap size={14} />
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Runway (T/O)</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider">T/O Dist</span>
                 </div>
                 <p className="text-sm font-bold text-gray-700 dark:text-gray-300">{a.takeoffDistance} ft</p>
               </div>
@@ -1328,6 +1763,30 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
                       <h4 className="text-[10px] text-gray-400 dark:text-gray-500 font-bold uppercase tracking-widest mb-4">Performance Charts</h4>
                       <AircraftPerformanceCharts aircraft={a} />
                     </div>
+
+                    {a.generalSpecs && (
+                      <div className="p-6 bg-gray-50/50 dark:bg-gray-800/50 rounded-3xl border border-gray-100 dark:border-gray-700">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Plane size={16} className="text-gray-600 dark:text-gray-400" />
+                          <h4 className="text-[10px] text-gray-900 dark:text-white font-black uppercase tracking-widest">Technical Overview</h4>
+                        </div>
+                        <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed italic">
+                          "{a.generalSpecs}"
+                        </p>
+                      </div>
+                    )}
+
+                    {a.specs && (
+                      <div className="p-6 bg-indigo-50/30 dark:bg-indigo-900/10 rounded-3xl border border-indigo-100/50 dark:border-indigo-800/30">
+                        <div className="flex items-center gap-2 mb-4">
+                          <FileText size={16} className="text-indigo-600 dark:text-indigo-400" />
+                          <h4 className="text-[10px] text-indigo-900 dark:text-indigo-200 font-black uppercase tracking-widest">Configuration & Technical Specs</h4>
+                        </div>
+                        <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">
+                          {a.specs}
+                        </p>
+                      </div>
+                    )}
 
                     <div>
                       <div className="flex justify-between items-center mb-4">
@@ -1418,7 +1877,7 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
                       )}
 
                       {flightHistoryCache[a.id!] && flightHistoryCache[a.id!].length > 0 ? (
-                        <div className="overflow-hidden rounded-xl border border-gray-100 dark:border-gray-700">
+                        <div className="overflow-hidden rounded-xl border border-gray-100 dark:border-gray-700 mb-8">
                           <table className="w-full text-xs text-left">
                             <thead className="bg-gray-50 dark:bg-gray-900/50 text-gray-500 dark:text-gray-400 uppercase font-bold tracking-widest">
                               <tr>
@@ -1460,9 +1919,153 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
                           </table>
                         </div>
                       ) : (
-                        <div className="p-8 text-center bg-gray-50 dark:bg-gray-900/30 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700">
+                        <div className="p-8 text-center bg-gray-50 dark:bg-gray-900/30 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700 mb-8">
                           <History size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
                           <p className="text-xs text-gray-400 dark:text-gray-500 italic">No flight history available for this aircraft.</p>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between items-center mb-4">
+                        <h4 className="text-[10px] text-gray-400 dark:text-gray-500 font-bold uppercase tracking-widest">Flight Schedules</h4>
+                        <button
+                          onClick={() => setSchedulingFlightId(a.id!)}
+                          className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors"
+                        >
+                          <Plus size={14} />
+                          Add Schedule
+                        </button>
+                      </div>
+
+                      {schedulingFlightId === a.id && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="mb-6 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border border-gray-100 dark:border-gray-700 space-y-4"
+                        >
+                          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Date</label>
+                              <input
+                                type="date"
+                                className="w-full p-2 text-xs border dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg"
+                                value={scheduleFormData.date}
+                                onChange={e => setScheduleFormData({ ...scheduleFormData, date: e.target.value })}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Dep ICAO</label>
+                              <input
+                                type="text"
+                                placeholder="e.g. DXB"
+                                className="w-full p-2 text-xs border dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg uppercase"
+                                value={scheduleFormData.departure}
+                                onChange={e => setScheduleFormData({ ...scheduleFormData, departure: e.target.value.toUpperCase() })}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Arr ICAO</label>
+                              <input
+                                type="text"
+                                placeholder="e.g. LHR"
+                                className="w-full p-2 text-xs border dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg uppercase"
+                                value={scheduleFormData.destination}
+                                onChange={e => setScheduleFormData({ ...scheduleFormData, destination: e.target.value.toUpperCase() })}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">ETD</label>
+                              <input
+                                type="time"
+                                className="w-full p-2 text-xs border dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg"
+                                value={scheduleFormData.etd}
+                                onChange={e => setScheduleFormData({ ...scheduleFormData, etd: e.target.value })}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">ETA</label>
+                              <input
+                                type="time"
+                                className="w-full p-2 text-xs border dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg"
+                                value={scheduleFormData.eta}
+                                onChange={e => setScheduleFormData({ ...scheduleFormData, eta: e.target.value })}
+                              />
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Crew Assignments</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Capt. Smith, FO Jones"
+                              className="w-full p-2 text-xs border dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-lg"
+                              value={scheduleFormData.crew_assignments}
+                              onChange={e => setScheduleFormData({ ...scheduleFormData, crew_assignments: e.target.value })}
+                            />
+                          </div>
+                          <div className="flex gap-2 justify-end">
+                            <button
+                              onClick={() => setSchedulingFlightId(null)}
+                              className="px-3 py-1.5 text-xs font-bold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={() => handleLogSchedule(a.id!)}
+                              disabled={loading || !scheduleFormData.departure || !scheduleFormData.destination}
+                              className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2"
+                            >
+                              {loading ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                              Save Schedule
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+
+                      {flightSchedulesCache[a.id!] && flightSchedulesCache[a.id!].length > 0 ? (
+                        <div className="overflow-hidden rounded-xl border border-gray-100 dark:border-gray-700">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-gray-50 dark:bg-gray-900/50 text-gray-500 dark:text-gray-400 uppercase font-bold tracking-widest">
+                              <tr>
+                                <th className="p-3 font-black">Date</th>
+                                <th className="p-3 font-black">Route</th>
+                                <th className="p-3 font-black text-center">Times (ETD - ETA)</th>
+                                <th className="p-3 font-black">Crew</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
+                              {flightSchedulesCache[a.id!].map((sched) => (
+                                <tr key={sched.id} className="text-gray-600 dark:text-gray-300 hover:bg-gray-50/50 dark:hover:bg-gray-800/50 transition-colors">
+                                  <td className="p-3 font-bold whitespace-nowrap">
+                                    <div className="flex items-center gap-2">
+                                      <Calendar size={12} className="text-indigo-500" />
+                                      {sched.date}
+                                    </div>
+                                  </td>
+                                  <td className="p-3 font-black">
+                                    <div className="flex items-center gap-2">
+                                      <MapPin size={12} className="text-amber-500" />
+                                      {sched.departure} 
+                                      <span className="text-gray-400">→</span> 
+                                      {sched.destination}
+                                    </div>
+                                  </td>
+                                  <td className="p-3 font-bold text-center">
+                                    <div className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-gray-50 dark:bg-gray-700/50 rounded-full border border-gray-100 dark:border-gray-600">
+                                      <Clock size={10} className="text-indigo-500" />
+                                      {sched.etd || '--:--'} - {sched.eta || '--:--'}
+                                    </div>
+                                  </td>
+                                  <td className="p-3 text-[10px] text-gray-500 dark:text-gray-400 italic">
+                                    {sched.crew_assignments || 'Unassigned'}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="p-8 text-center bg-gray-50 dark:bg-gray-900/30 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700">
+                          <Calendar size={24} className="mx-auto text-gray-300 dark:text-gray-600 mb-2" />
+                          <p className="text-xs text-gray-400 dark:text-gray-500 italic">No future schedules planned.</p>
                         </div>
                       )}
                     </div>
@@ -1479,7 +2082,19 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
         <div className="text-center py-20 bg-white dark:bg-gray-800 rounded-3xl border border-dashed border-gray-200 dark:border-gray-700">
           <Plane size={48} className="mx-auto text-gray-200 dark:text-gray-600 mb-4" />
           <p className="text-gray-400 dark:text-gray-500 font-bold uppercase tracking-widest text-xs">No Aircraft Found</p>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 mb-6">Add your first aircraft to start quoting.</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 mb-6">
+            {searchTerm ? `No matches for "${searchTerm}" in your local database.` : 'Add your first aircraft to start quoting.'}
+          </p>
+          {searchTerm && (
+            <button
+              onClick={() => handleAIFetch(searchTerm)}
+              disabled={aiFetching}
+              className="mx-auto flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-indigo-700 transition shadow-lg shadow-indigo-200 dark:shadow-none disabled:opacity-50"
+            >
+              {aiFetching ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
+              {aiFetching ? 'Scraping Specs...' : `Deep Search AI: ${searchTerm}`}
+            </button>
+          )}
         </div>
       )}
     </div>

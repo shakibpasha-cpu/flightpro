@@ -233,9 +233,12 @@ export const ACMIDatabase: React.FC = () => {
     }
   };
 
-  const filteredData = data.filter(item => 
-    JSON.stringify(item).toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredData = data.filter(item => {
+    const searchStr = searchTerm.toLowerCase();
+    return Object.values(item).some(val => 
+      String(val).toLowerCase().includes(searchStr)
+    );
+  });
 
   return (
     <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-950 overflow-hidden">

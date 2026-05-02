@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { safeStringify } from '../utils/safeJson';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Globe, 
@@ -67,7 +68,7 @@ export default function AuthorityIntelligence() {
       const response = await fetch('/api/scrape-authority', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
+        body: safeStringify({ url })
       });
 
       if (!response.ok) throw new Error('Failed to scrape website');

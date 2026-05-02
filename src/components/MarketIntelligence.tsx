@@ -25,6 +25,7 @@ import { db } from '../firebase';
 import { collection, getDocs, query, limit, orderBy, addDoc, where, updateDoc, doc } from 'firebase/firestore';
 import { GoogleGenAI } from "@google/genai";
 import { fleetSeederService } from '../services/fleetSeederService';
+import { safeStringify } from '../utils/safeJson';
 
 interface MarketTrend {
   aircraftType: string;
@@ -101,7 +102,7 @@ export default function MarketIntelligence() {
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: `Analyze this ACMI market data and provide 3 key strategic insights for a broker. 
-        Data: ${JSON.stringify(data)}
+        Data: ${safeStringify(data)}
         Focus on: High demand aircraft types, regional pricing anomalies, and supply shortages.
         Keep it professional, concise, and actionable.`,
       });

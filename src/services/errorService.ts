@@ -1,3 +1,5 @@
+import { safeStringify } from '../utils/safeJson';
+
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -40,8 +42,8 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.error('Firestore Error: ', safeStringify(errInfo));
+  throw new Error(safeStringify(errInfo));
 }
 
 export interface ApiErrorInfo {
@@ -53,7 +55,7 @@ export interface ApiErrorInfo {
   timestamp: string;
 }
 
-export function handleApiError(error: unknown, service: string, endpoint?: string) {
+export function handleApiError(error: unknown, service: string, endpoint?: string, silent: boolean = false) {
   const message = error instanceof Error ? error.message : String(error);
   const isQuotaExceeded = 
     message.includes('429') || 
@@ -70,8 +72,10 @@ export function handleApiError(error: unknown, service: string, endpoint?: strin
     timestamp: new Date().toISOString()
   };
 
-  console.error(`API Error [${service}]:`, JSON.stringify(errInfo));
+  console.error(`API Error [${service}]:`, safeStringify(errInfo));
   
+  if (silent) return;
+
   // Return a user-friendly message
   if (isQuotaExceeded) {
     throw new Error(`The ${service} service is currently busy (quota exceeded). Please try again in a few minutes.`);

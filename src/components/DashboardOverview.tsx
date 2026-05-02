@@ -26,6 +26,7 @@ import {
   Legend
 } from 'recharts';
 import { motion } from 'motion/react';
+import { createNotification, notifySignificantDelay, notifyWeatherChange } from '../services/notificationService';
 
 const revenueData = [
   { name: 'Jan', revenue: 45000, margin: 8500 },
@@ -55,6 +56,21 @@ const recentActivity = [
 ];
 
 export default function DashboardOverview() {
+  const simulateAlert = () => {
+    const alerts = [
+      () => notifySignificantDelay('EK201', 45),
+      () => notifyWeatherChange('LHR', 'Fog / Heavy Rain'),
+      () => createNotification({
+        title: 'Airspace Restriction',
+        message: 'Sudden closure of Polish airspace due to military drills.',
+        type: 'critical',
+        category: 'airspace'
+      })
+    ];
+    const randomAlert = alerts[Math.floor(Math.random() * alerts.length)];
+    randomAlert();
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-center">
@@ -63,6 +79,13 @@ export default function DashboardOverview() {
           <p className="text-sm text-gray-500 dark:text-gray-400">Welcome back, Admin. Here's what's happening today.</p>
         </div>
         <div className="flex gap-3">
+          <button 
+            onClick={simulateAlert}
+            className="flex items-center gap-2 px-4 py-2 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-800 rounded-xl font-bold text-xs hover:bg-rose-100 transition shadow-sm"
+          >
+            <ShieldAlert size={16} />
+            Simulate Alert
+          </button>
           <select className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white text-sm font-medium rounded-xl px-4 py-2 shadow-sm outline-none focus:ring-2 focus:ring-indigo-500">
             <option>Last 30 Days</option>
             <option>This Quarter</option>

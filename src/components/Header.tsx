@@ -1,7 +1,9 @@
-import React from 'react';
-import { Search, Bell, User as UserIcon, LogOut, Moon, Sun, LogIn } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Bell, User as UserIcon, LogOut, Moon, Sun, LogIn, AlertTriangle, Loader2 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { signInWithGoogle, signOut } from '../firebase';
+import { getQuotaCooldown } from '../services/aiService';
+import NotificationSystem from './NotificationSystem';
 
 interface HeaderProps {
   user: User | null;
@@ -10,6 +12,18 @@ interface HeaderProps {
 }
 
 export default function Header({ user, isDarkMode, setIsDarkMode }: HeaderProps) {
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const remaining = getQuotaCooldown();
+      if (remaining !== cooldown) {
+        setCooldown(remaining);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldown]);
+
   return (
     <header className="h-20 bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between px-8 sticky top-0 z-10">
       <div className="flex items-center gap-6 flex-grow">
@@ -21,6 +35,17 @@ export default function Header({ user, isDarkMode, setIsDarkMode }: HeaderProps)
             className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm font-medium text-gray-900 dark:text-white outline-none"
           />
         </div>
+
+        {cooldown > 0 && (
+          <div className="animate-pulse flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+            <AlertTriangle size={16} className="text-amber-600 dark:text-amber-400" />
+            <div className="flex flex-col">
+              <span className="text-[10px] font-black text-amber-800 dark:text-amber-200 uppercase tracking-tighter leading-none">AI Engine Cooling Down</span>
+              <span className="text-[9px] font-bold text-amber-600/70 dark:text-amber-400/50 uppercase tracking-widest mt-0.5">Ready in {Math.ceil(cooldown / 1000)}s</span>
+            </div>
+            <Loader2 size={12} className="animate-spin text-amber-600" />
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-4">
@@ -32,10 +57,7 @@ export default function Header({ user, isDarkMode, setIsDarkMode }: HeaderProps)
           {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
         </button>
 
-        <button className="p-3 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all relative">
-          <Bell size={20} />
-          <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-gray-900"></span>
-        </button>
+        <NotificationSystem />
 
         <div className="h-10 w-px bg-gray-100 dark:bg-gray-800 mx-2"></div>
 

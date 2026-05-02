@@ -121,6 +121,13 @@ export default function ACMIMarketplace({ onGenerateQuote, setActiveTab, initial
       setEnrichmentProgress(prev => ({ ...prev, current: i + 1 }));
       
       try {
+        // Check for global AI cooldown before making the call
+        const { getQuotaCooldown } = await import('../services/aiService');
+        if (getQuotaCooldown() > 0) {
+          console.warn('AI Cooldown in effect, skipping enrichment for now');
+          break; // Stop the batch if we hit a quota
+        }
+
         const details = await getOperatorDetails(a.operatorName, a.baseAirport);
         if (details && a.operator_id) {
           await updateDoc(doc(db, 'operators', a.operator_id), {
@@ -133,8 +140,8 @@ export default function ACMIMarketplace({ onGenerateQuote, setActiveTab, initial
             last_enriched: new Date().toISOString()
           });
         }
-        // Small delay to avoid hitting rate limits too hard
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Increased delay to avoid hitting rate limits (2 seconds for free tier safety)
+        await new Promise(resolve => setTimeout(resolve, 2000));
       } catch (error) {
         console.error(`Failed to enrich operator ${a.operatorName}:`, error);
       }

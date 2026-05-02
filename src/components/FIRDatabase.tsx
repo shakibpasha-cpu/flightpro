@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Globe, Shield, DollarSign, Loader2, Plus, Trash2, Edit2, Check, X, AlertTriangle, Sparkles, Phone, FileText, Link as LinkIcon, Mail, MapPin } from 'lucide-react';
 import { db } from '../firebase';
-import { collection, addDoc, query, getDocs, deleteDoc, doc, updateDoc, limit, where } from 'firebase/firestore';
+import { collection, addDoc, query, getDocs, deleteDoc, doc, updateDoc, limit, where, writeBatch } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
-import { getFIRDetails, fetchSpecificCharge, fetchFIRRules } from '../services/aiService';
+import { getFIRDetails, fetchSpecificCharge, fetchFIRRules, searchFIRsByCountry } from '../services/aiService';
 
 interface FIR {
   id?: string;
@@ -19,6 +19,7 @@ interface FIR {
   website?: string;
   sop?: string;
   documentationUrl?: string;
+  polygon?: [number, number][];
   updatedAt?: string;
 }
 
@@ -27,6 +28,8 @@ export default function FIRDatabase() {
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [countryFilter, setCountryFilter] = useState('All');
+  const [countryInput, setCountryInput] = useState('');
+  const [scrapingCountry, setScrapingCountry] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -42,14 +45,127 @@ export default function FIRDatabase() {
     email: '',
     website: '',
     sop: '',
-    documentationUrl: ''
+    documentationUrl: '',
+    polygon: []
   });
+
+  const seedData = async () => {
+    setLoading(true);
+    const sampleFirs = [
+      // Middle East
+      { 
+        code: 'OPLR', 
+        name: 'Lahore FIR', 
+        country: 'Pakistan', 
+        overflightCharge: 150, 
+        navigationCharge: 50, 
+        rules: 'Standard ICAO procedures apply. Prior notification required for non-scheduled flights.',
+        phone: '+92 21 99071111',
+        email: 'info@caapakistan.com.pk',
+        website: 'https://www.caapakistan.com.pk/',
+        sop: '1. File flight plan 24h in advance.\n2. Maintain contact with Lahore Control on 124.7 MHz.',
+        documentationUrl: 'https://www.caapakistan.com.pk/'
+      },
+      { 
+        code: 'OPKR', 
+        name: 'Karachi FIR', 
+        country: 'Pakistan', 
+        overflightCharge: 155, 
+        navigationCharge: 55, 
+        rules: 'Oceanic procedures in effect for southern sectors.',
+        phone: '+92 21 99248761',
+        email: 'info@caapakistan.com.pk',
+        website: 'https://www.caapakistan.com.pk/',
+        sop: 'ADS-C/CPDLC required for oceanic sectors.',
+        documentationUrl: 'https://www.caapakistan.com.pk/'
+      },
+      { code: 'OEJD', name: 'Jeddah FIR', country: 'Saudi Arabia', overflightCharge: 250, navigationCharge: 100, rules: 'Hajj season restrictions apply. High density traffic.' },
+      { code: 'OMAE', name: 'Emirates FIR', country: 'UAE', overflightCharge: 180, navigationCharge: 90, rules: 'Complex airspace structure. Precise navigation required.' },
+      { code: 'OKAC', name: 'Kuwait FIR', country: 'Kuwait', overflightCharge: 160, navigationCharge: 70, rules: 'Coordination with military airspace required in western sectors.' },
+      { code: 'OBBB', name: 'Bahrain FIR', country: 'Bahrain', overflightCharge: 170, navigationCharge: 80, rules: 'Major Gulf regional hub. RVSM procedures enforced.' },
+      
+      // Europe
+      { code: 'EGTT', name: 'London FIR', country: 'United Kingdom', overflightCharge: 300, navigationCharge: 150, rules: 'Eurocontrol managed. Strict slot adherence.' },
+      { code: 'LFBB', name: 'Bordeaux FIR', country: 'France', overflightCharge: 280, navigationCharge: 140, rules: 'High density traffic. Flexible Use of Airspace (FUA).' },
+      { code: 'EDGG', name: 'Langen FIR', country: 'Germany', overflightCharge: 320, navigationCharge: 160, rules: 'Core European corridor. 8.33 kHz radio spacing mandatory.' },
+      { code: 'LIMM', name: 'Milano FIR', country: 'Italy', overflightCharge: 240, navigationCharge: 120, rules: 'Alpine crossing procedures. Mandatory transponder in all classes.' },
+      { code: 'LECB', name: 'Barcelona FIR', country: 'Spain', overflightCharge: 260, navigationCharge: 130, rules: 'Tourist season peaks. 24h prior PPR for major hubs.' },
+      { code: 'EGPX', name: 'Scottish FIR', country: 'United Kingdom', overflightCharge: 220, navigationCharge: 110, rules: 'Oceanic transition area. NAT entry point.' },
+      { code: 'LFFF', name: 'Paris FIR', country: 'France', overflightCharge: 290, navigationCharge: 145, rules: 'Major European traffic intersection. Strict adherence to airway levels.' },
+      { code: 'LSAS', name: 'Switzerland FIR', country: 'Switzerland', overflightCharge: 350, navigationCharge: 175, rules: 'Alpine terrain procedures. High precision navigation required in narrow valleys.' },
+      { code: 'LOVV', name: 'Vienna FIR', country: 'Austria', overflightCharge: 275, navigationCharge: 135, rules: 'Crossing point for East/West traffic. RVSM and 8.33 kHz mandatory.' },
+      { code: 'LKAA', name: 'Prague FIR', country: 'Czech Republic', overflightCharge: 265, navigationCharge: 130, rules: 'Central European hub coordination. Mandatory transponder Mode S.' },
+
+      // North America
+      { code: 'KZNY', name: 'New York FIR', country: 'USA', overflightCharge: 220, navigationCharge: 110, rules: 'North Atlantic Tracks (NAT) gateway. RVSM procedures apply.' },
+      { code: 'KZLA', name: 'Los Angeles FIR', country: 'USA', overflightCharge: 210, navigationCharge: 105, rules: 'Pacific oceanic boundary. High complexity terrain.' },
+      { code: 'CZUL', name: 'Montreal FIR', country: 'Canada', overflightCharge: 180, navigationCharge: 90, rules: 'Arctic routing procedures. Mandatory ELT for remote legs.' },
+      { code: 'MMID', name: 'Mexico FIR', country: 'Mexico', overflightCharge: 190, navigationCharge: 95, rules: 'Language requirements for secondary airports. Surcharge for night ops.' },
+      { code: 'KZHU', name: 'Houston FIR', country: 'USA', overflightCharge: 200, navigationCharge: 100, rules: 'Gulf of Mexico operations. Seasonal hurricane procedures.' },
+      { code: 'PAZA', name: 'Anchorage FIR', country: 'USA', overflightCharge: 195, navigationCharge: 95, rules: 'Arctic and Pacific oceanic interface. Strict cold-weather altimetry.' },
+      { code: 'CZEG', name: 'Edmonton FIR', country: 'Canada', overflightCharge: 175, navigationCharge: 85, rules: 'High latitude operations. Mandatory reporting for remote northern sectors.' },
+      { code: 'KZBW', name: 'Boston FIR', country: 'USA', overflightCharge: 215, navigationCharge: 105, rules: 'Heavy transatlantic traffic. Strategic NAT transition points.' },
+
+      // Asia
+      { code: 'VIDP', name: 'Delhi FIR', country: 'India', overflightCharge: 200, navigationCharge: 80, rules: 'Strict adherence to assigned levels. RVSM airspace. Prior auth required.' },
+      { code: 'VOMF', name: 'Chennai FIR', country: 'India', overflightCharge: 190, navigationCharge: 75, rules: 'Major oceanic gateway. CPDLC preferred. SLOP encouraged.' },
+      { code: 'WSSS', name: 'Singapore FIR', country: 'Singapore', overflightCharge: 150, navigationCharge: 70, rules: 'Strategic Southeast Asian hub. High-precision RNP approaches.' },
+      { code: 'VHHH', name: 'Hong Kong FIR', country: 'China (SAR)', overflightCharge: 220, navigationCharge: 110, rules: 'Busy terminal area. English proficiency Level 4 mandatory.' },
+      { code: 'VTBB', name: 'Bangkok FIR', country: 'Thailand', overflightCharge: 185, navigationCharge: 90, rules: 'Seasonal monsoon restrictions. Complex military/civil coordination.' },
+      { code: 'VABB', name: 'Mumbai FIR', country: 'India', overflightCharge: 195, navigationCharge: 80, rules: 'Oceanic transition. Mandatory transponder in all altitudes.' },
+      { code: 'WMFC', name: 'Kuala Lumpur FIR', country: 'Malaysia', overflightCharge: 165, navigationCharge: 75, rules: 'RVSM in effect. Strict slot adherence for major airports.' },
+      { code: 'VVVV', name: 'Hanoi FIR', country: 'Vietnam', overflightCharge: 170, navigationCharge: 80, rules: 'Mandatory position reporting over domestic waypoints.' },
+
+      // Asia/Rest of World
+      { code: 'YBBN', name: 'Brisbane FIR', country: 'Australia', overflightCharge: 170, navigationCharge: 85, rules: 'Large scale remote management. Satellite tracking enabled.' }
+    ];
+
+    try {
+      const batch = writeBatch(db);
+      const firsRef = collection(db, 'firs');
+      let count = 0;
+      
+      for (const fir of sampleFirs) {
+        const q = query(firsRef, where('code', '==', fir.code));
+        const snapshot = await getDocs(q);
+        if (snapshot.empty) {
+          const docRef = doc(firsRef);
+          batch.set(docRef, { ...fir, createdAt: new Date().toISOString() });
+          count++;
+        }
+      }
+      
+      if (count > 0) {
+        await batch.commit();
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Seeding error:', error);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchFirs = async () => {
     setLoading(true);
     try {
       const q = query(collection(db, 'firs'), limit(50));
       const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        const seeded = await seedData();
+        if (seeded) {
+          // Fetch again after seeding
+          const newSnapshot = await getDocs(q);
+          const data = newSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FIR));
+          setFirs(data);
+          checkAndAutoFetch(data);
+          return;
+        }
+      }
+
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FIR));
       setFirs(data);
       
@@ -57,7 +173,6 @@ export default function FIRDatabase() {
       checkAndAutoFetch(data);
     } catch (error) {
       handleFirestoreError(error, OperationType.LIST, 'firs');
-    } finally {
       setLoading(false);
     }
   };
@@ -104,6 +219,52 @@ export default function FIRDatabase() {
   useEffect(() => {
     fetchFirs();
   }, []);
+
+  const handleFetchByCountry = async () => {
+    if (!countryInput.trim()) return;
+    
+    setScrapingCountry(true);
+    setValidationError(null);
+    try {
+      const result = await searchFIRsByCountry(countryInput);
+      if (result && result.firs && result.firs.length > 0) {
+        const batch = writeBatch(db);
+        const firsRef = collection(db, 'firs');
+        
+        for (const fir of result.firs) {
+          // Check if already exists in local state to avoid duplicates during this session
+          // In a real app we'd check Firebase, but for now we'll just try to add or update
+          const existing = firs.find(f => f.code === fir.code);
+          if (existing) {
+            const docRef = doc(db, 'firs', existing.id!);
+            batch.update(docRef, { 
+              ...fir, 
+              updatedAt: new Date().toISOString() 
+            });
+          } else {
+            const docRef = doc(firsRef);
+            batch.set(docRef, { 
+              ...fir, 
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            });
+          }
+        }
+        
+        await batch.commit();
+        fetchFirs();
+        setCountryInput('');
+        alert(`Successfully fetched ${result.firs.length} FIRs for ${countryInput}`);
+      } else {
+        setValidationError(`No FIRs found for ${countryInput}. Try a different country name.`);
+      }
+    } catch (error) {
+      console.error('Scraping error:', error);
+      setValidationError('Failed to scrape FIR database for this country.');
+    } finally {
+      setScrapingCountry(false);
+    }
+  };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -307,59 +468,6 @@ export default function FIRDatabase() {
     }
   };
 
-  const seedData = async () => {
-    setLoading(true);
-    const sampleFirs = [
-      { 
-        code: 'OPLR', 
-        name: 'Lahore FIR', 
-        country: 'Pakistan', 
-        overflightCharge: 150, 
-        navigationCharge: 50, 
-        rules: 'Standard ICAO procedures apply. Prior notification required for non-scheduled flights.',
-        phone: '+92 21 99071111',
-        email: 'info@caapakistan.com.pk',
-        website: 'https://www.caapakistan.com.pk/',
-        sop: '1. File flight plan 24h in advance.\n2. Maintain contact with Lahore Control on 124.7 MHz.',
-        documentationUrl: 'https://www.caapakistan.com.pk/'
-      },
-      { 
-        code: 'OPKR', 
-        name: 'Karachi FIR', 
-        country: 'Pakistan', 
-        overflightCharge: 155, 
-        navigationCharge: 55, 
-        rules: 'Oceanic procedures in effect for southern sectors.',
-        phone: '+92 21 99248761',
-        email: 'info@caapakistan.com.pk',
-        website: 'https://www.caapakistan.com.pk/',
-        sop: 'ADS-C/CPDLC required for oceanic sectors.',
-        documentationUrl: 'https://www.caapakistan.com.pk/'
-      },
-      { code: 'VIDP', name: 'Delhi FIR', country: 'India', overflightCharge: 200, navigationCharge: 80, rules: 'Strict adherence to assigned levels. RVSM airspace.' },
-      { code: 'VOMF', name: 'Chennai FIR', country: 'India', overflightCharge: 190, navigationCharge: 75, rules: 'Major oceanic gateway. CPDLC preferred.' },
-      { code: 'OEJD', name: 'Jeddah FIR', country: 'Saudi Arabia', overflightCharge: 250, navigationCharge: 100, rules: 'Hajj season restrictions apply. High density traffic.' },
-      { code: 'OMAE', name: 'Emirates FIR', country: 'UAE', overflightCharge: 180, navigationCharge: 90, rules: 'Complex airspace structure. Precise navigation required.' },
-      { code: 'EGTT', name: 'London FIR', country: 'United Kingdom', overflightCharge: 300, navigationCharge: 150, rules: 'Eurocontrol managed. Strict slot adherence.' },
-      { code: 'KZNY', name: 'New York FIR', country: 'USA', overflightCharge: 220, navigationCharge: 110, rules: 'North Atlantic Tracks (NAT) gateway.' }
-    ];
-
-    try {
-      for (const fir of sampleFirs) {
-        const q = query(collection(db, 'firs'), where('code', '==', fir.code));
-        const snapshot = await getDocs(q);
-        if (snapshot.empty) {
-          await addDoc(collection(db, 'firs'), { ...fir, createdAt: new Date().toISOString() });
-        }
-      }
-      fetchFirs();
-    } catch (error) {
-      console.error('Seeding error:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const filteredFirs = firs.filter(fir => {
     const query = searchQuery.toLowerCase().trim();
     const matchesSearch = 
@@ -427,6 +535,32 @@ export default function FIRDatabase() {
               <option key={country} value={country}>{country}</option>
             ))}
           </select>
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 flex flex-col md:flex-row gap-4 items-center">
+          <div className="flex-1 flex gap-2 w-full">
+            <div className="relative flex-1">
+              <Globe className="absolute left-3 top-3 text-gray-400 dark:text-gray-500" size={18} />
+              <input 
+                type="text" 
+                placeholder="Enter country to discover ALL FIRs (e.g. Pakistan, India)..." 
+                className="w-full pl-10 p-3 bg-gray-50 dark:bg-gray-900/50 border border-transparent focus:border-indigo-500 rounded-xl outline-none transition dark:text-white text-sm"
+                value={countryInput}
+                onChange={(e) => setCountryInput(e.target.value)}
+              />
+            </div>
+            <button
+              onClick={handleFetchByCountry}
+              disabled={scrapingCountry || !countryInput.trim()}
+              className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition disabled:opacity-50 border border-indigo-100 dark:border-indigo-800"
+            >
+              {scrapingCountry ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
+              Fetch FIRs
+            </button>
+          </div>
+          <p className="text-[10px] text-gray-400 font-medium italic md:w-48 text-center md:text-left">
+            AI will scan global aeronautical data to find all FIRs for the specified country.
+          </p>
         </div>
       </div>
 

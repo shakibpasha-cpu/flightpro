@@ -228,6 +228,7 @@ export function calculateTotalProjectedCost(params: {
   airportCharges: number;
   crewCost: number;
   positioningCost: number;
+  cateringCost: number;
   marketMultiplier: number; 
   riskMultiplier: number; 
   contingencyRate: number; 
@@ -242,7 +243,8 @@ export function calculateTotalProjectedCost(params: {
                              params.firCharges +
                              params.airportCharges +
                              params.crewCost +
-                             params.positioningCost;
+                             params.positioningCost +
+                             params.cateringCost;
 
   // 3. Base Mission Cost (Bracketed Part)
   const baseMissionCost = flightTimeCost + operationalAddons;
@@ -319,6 +321,7 @@ export function calculateTotalACMICost(breakdown: any) {
     airportCharges: (breakdown.landingFees || 0) + (breakdown.groundHandling || 0) + (breakdown.parkingFees || 0),
     crewCost: breakdown.crewCost,
     positioningCost: 0,
+    cateringCost: breakdown.cateringCost || 0,
     marketMultiplier: 1.0, 
     riskMultiplier: 1.0 + (breakdown.insuranceSurcharge / (breakdown.insurance || 1) || 0),
     contingencyRate: (breakdown.contingencyPercentage || 5) / 100,

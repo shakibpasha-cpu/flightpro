@@ -4,6 +4,7 @@ import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, onSnapshot } fr
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
 import { Building2, Plus, Search, Globe, MapPin, Star, Trash2, Edit2, X, Loader2, Sparkles, Mail, CheckCircle2, XCircle, ShieldCheck, Phone, Link, Hash, Info, Calendar, Briefcase, Filter, ExternalLink, Plane, RefreshCw } from 'lucide-react';
 import { operatorService, Operator } from '../services/operatorService';
+import { safeStringify } from '../utils/safeJson';
 import { getOperatorDetails } from '../services/aiService';
 
 export default function OperatorDatabase() {
@@ -33,6 +34,9 @@ export default function OperatorDatabase() {
     phone: '',
     founded_year: new Date().getFullYear(),
     fleet_size: 0,
+    fleet_quantity: 0,
+    avg_fleet_age: 0,
+    aircraft_types_operated: [],
     lastContacted: '',
     manual_notes: ''
   });
@@ -65,7 +69,10 @@ export default function OperatorDatabase() {
           phone: details.phone || prev.phone,
           icao_code: details.icao_code || prev.icao_code,
           iata_code: details.iata_code || prev.iata_code,
-          manual_notes: details.summary || prev.manual_notes
+          manual_notes: details.summary || prev.manual_notes,
+          fleet_quantity: details.fleet_quantity || prev.fleet_quantity,
+          avg_fleet_age: details.avg_fleet_age || prev.avg_fleet_age,
+          aircraft_types_operated: details.aircraft_types_operated || prev.aircraft_types_operated
         }));
       }
     } catch (error) {
@@ -99,6 +106,9 @@ export default function OperatorDatabase() {
             icao_code: op.icao_code || details.icao_code || '',
             iata_code: op.iata_code || details.iata_code || '',
             general_notes: details.summary || op.general_notes || '',
+            fleet_quantity: op.fleet_quantity || details.fleet_quantity || 0,
+            avg_fleet_age: op.avg_fleet_age || details.avg_fleet_age || 0,
+            aircraft_types_operated: op.aircraft_types_operated || details.aircraft_types_operated || [],
             last_enriched: new Date().toISOString()
           });
         }
@@ -142,6 +152,9 @@ export default function OperatorDatabase() {
         phone: '',
         founded_year: new Date().getFullYear(),
         fleet_size: 0,
+        fleet_quantity: 0,
+        avg_fleet_age: 0,
+        aircraft_types_operated: [],
         lastContacted: '',
         manual_notes: ''
       });
@@ -191,7 +204,7 @@ export default function OperatorDatabase() {
       const response = await fetch('/api/enrich-operator', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ operatorName: airlineName, country })
+        body: safeStringify({ operatorName: airlineName, country })
       });
 
       if (response.ok) {
@@ -379,6 +392,9 @@ export default function OperatorDatabase() {
                           phone: op.phone || '',
                           founded_year: op.founded_year || new Date().getFullYear(),
                           fleet_size: op.fleet_size || 0,
+                          fleet_quantity: op.fleet_quantity || 0,
+                          avg_fleet_age: op.avg_fleet_age || 0,
+                          aircraft_types_operated: op.aircraft_types_operated || [],
                           lastContacted: op.lastContacted || '',
                           manual_notes: op.manual_notes || ''
                         });
@@ -430,14 +446,24 @@ export default function OperatorDatabase() {
                   </div>
                 </div>
                 <div className="p-3 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
-                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Fleet Size</p>
-                  <div className="flex items-center gap-2">
-                    <Plane size={12} className="text-blue-500" />
-                    <span className="text-xs font-black text-gray-900 dark:text-white">{op.fleet_size || 0} AC</span>
-                    {op.last_fleet_update && (
-                      <span className="text-[8px] text-gray-400 font-bold uppercase ml-1">Updated {new Date(op.last_fleet_update).toLocaleDateString()}</span>
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Fleet Summary</p>
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <Plane size={12} className="text-blue-500" />
+                      <span className="text-xs font-black text-gray-900 dark:text-white">{op.fleet_size || 0} AC</span>
+                      {op.avg_fleet_age > 0 && (
+                        <span className="text-[10px] text-gray-500 font-bold ml-1">ø {op.avg_fleet_age}y</span>
+                      )}
+                    </div>
+                    {op.aircraft_types_operated && op.aircraft_types_operated.length > 0 && (
+                      <p className="text-[9px] text-gray-400 font-bold uppercase truncate max-w-[120px]">
+                        {op.aircraft_types_operated.join(', ')}
+                      </p>
                     )}
                   </div>
+                  {op.last_fleet_update && (
+                    <span className="text-[8px] text-gray-400 font-bold uppercase mt-1 block">Updated {new Date(op.last_fleet_update).toLocaleDateString()}</span>
+                  )}
                 </div>
               </div>
 
@@ -730,14 +756,38 @@ export default function OperatorDatabase() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Fleet Size</label>
+                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Fleet Quantity</label>
                     <input
                       type="number"
                       className="w-full p-4 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white"
-                      value={formData.fleet_size}
-                      onChange={e => setFormData({ ...formData, fleet_size: parseInt(e.target.value) })}
+                      value={formData.fleet_quantity}
+                      onChange={e => setFormData({ ...formData, fleet_quantity: parseInt(e.target.value) || 0, fleet_size: parseInt(e.target.value) || 0 })}
                     />
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Avg. Fleet Age (Y)</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white"
+                      value={formData.avg_fleet_age}
+                      onChange={e => setFormData({ ...formData, avg_fleet_age: parseFloat(e.target.value) || 0 })}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Aircraft Types Operated (Comma Separated)</label>
+                  <input
+                    type="text"
+                    className="w-full p-4 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all dark:text-white"
+                    value={formData.aircraft_types_operated?.join(', ')}
+                    onChange={e => setFormData({ ...formData, aircraft_types_operated: e.target.value.split(',').map(s => s.trim()).filter(s => s !== '') })}
+                    placeholder="e.g. A320, B737, A350"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-xs font-black text-gray-400 uppercase tracking-widest ml-1">Last Contacted</label>
                     <input

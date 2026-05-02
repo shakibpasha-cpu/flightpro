@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Sparkles, Loader2, Plane, MapPin, DollarSign, Fuel, Info, AlertTriangle, Zap, Lightbulb, ShieldAlert, Cloud, FileText, Globe, ChevronDown, ChevronUp, Users, Settings, Download, Calendar } from 'lucide-react';
-import { planComplexFlight, analyzeFlightPlan, getFIRDetails, searchHandlingAgents, getPermitDetails, getOptimizationAlternatives, getAirportDetails, suggestFuelStop, analyzePermits, getAirportFIR } from '../services/aiService';
+import { Sparkles, Loader2, Plane, MapPin, DollarSign, Fuel, Info, AlertTriangle, Zap, Lightbulb, ShieldAlert, Cloud, FileText, Globe, ChevronDown, ChevronUp, ChevronRight, Users, Settings, Download, Calendar, ShieldCheck, Tag, Clock, Activity, Route, ListOrdered } from 'lucide-react';
+import { planComplexFlight, analyzeFlightPlan, getFIRDetails, searchHandlingAgents, getPermitDetails, getOptimizationAlternatives, getAirportDetails, suggestFuelStop, analyzePermits, getAirportFIR, getLegFIRAnalysis } from '../services/aiService';
 
 import { motion, AnimatePresence } from 'motion/react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend as RechartsLegend } from 'recharts';
@@ -23,12 +23,311 @@ interface AIPlannerProps {
   onPlanChange: (plan: any) => void;
   onHoverLeg?: (index: number | null) => void;
   formData?: any;
+  onFormDataChange?: (formData: any) => void;
   currentQuoteLegs?: any[];
+  setActiveMapInput?: (input: 'departure' | 'destination' | 'none') => void;
 }
 
 type TabType = 'itinerary' | 'fuel' | 'costing' | 'permits' | 'handling' | 'optimization' | 'fir' | 'crew' | 'ai-analysis';
 
-export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg, formData, currentQuoteLegs }: AIPlannerProps) {
+const LegCard = ({ 
+  leg, 
+  idx, 
+  onHover, 
+  onNoteChange, 
+  onAssignCrew, 
+  crewList, 
+  suggestedAircraftDetails, 
+  setActiveTab, 
+  handleSuggestStops,
+  hoveredLegIndex 
+}: any) => {
+  const [expanded, setExpanded] = useState(false);
+  const [showLogistics, setShowLogistics] = useState(false);
+  
+  const legNotams = leg.notams || [];
+  const legWeather = leg.weather || [];
+  const hasRestricted = leg.restrictedAreaDetected || (leg.restrictedAreas && leg.restrictedAreas.length > 0);
+  const isHovered = hoveredLegIndex === idx;
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: idx * 0.05 }}
+      className="relative mb-6"
+      onMouseEnter={() => onHover(idx)}
+      onMouseLeave={() => onHover(null)}
+    >
+      <div className={`p-6 rounded-[2rem] border transition-all duration-500 overflow-hidden ${
+        expanded 
+          ? 'bg-white dark:bg-gray-800 border-indigo-200 dark:border-indigo-500 shadow-2xl shadow-indigo-100/50 dark:shadow-none' 
+          : 'bg-white/90 dark:bg-gray-900/40 border-gray-100 dark:border-gray-800 hover:border-indigo-200 dark:hover:border-indigo-800 shadow-sm'
+      }`}>
+        {/* Modern Accent Decoration */}
+        {expanded && (
+          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 blur-3xl -mr-16 -mt-16 rounded-full" />
+        )}
+
+        <div className="flex flex-col md:flex-row md:items-center gap-6 relative z-10">
+          {/* Leg Badge Indicator */}
+          <div className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center border-2 transition-all duration-500 ${
+            expanded ? 'bg-indigo-600 border-indigo-500 text-white rotate-3 scale-110' : 'bg-gray-50 dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-400'
+          }`}>
+            <span className="text-[8px] font-black uppercase tracking-tighter mb-0.5">Leg</span>
+            <span className="text-xl font-black">{idx + 1}</span>
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-10 mb-5">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Departure Port</span>
+                </div>
+                <h4 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight flex items-baseline gap-3">
+                  {leg.departure}
+                  <span className="text-[10px] font-bold text-indigo-500 truncate">
+                    {leg.departureDetails?.name?.slice(0, 30) || 'Loading Intel...'}
+                  </span>
+                </h4>
+              </div>
+              
+              <div className="flex items-center gap-4 py-2 px-6 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border border-gray-100 dark:border-gray-800">
+                <div className="text-center">
+                   <p className="text-[10px] font-black text-gray-900 dark:text-white leading-none">{leg.distance}</p>
+                   <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">NM</p>
+                </div>
+                <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1" />
+                <motion.div
+                  animate={hoveredLegIndex === idx ? { x: [0, 5, 0] } : {}}
+                  transition={{ repeat: Infinity, duration: 1.5 }}
+                >
+                  <Plane size={16} className="text-indigo-600 dark:text-indigo-400" />
+                </motion.div>
+                <div className="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1" />
+                <div className="text-center">
+                   <p className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 leading-none">{leg.flightTime}</p>
+                   <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">HRS</p>
+                </div>
+              </div>
+
+              <div className="flex-1 min-w-0 md:text-right">
+                <div className="flex items-center md:justify-end gap-2 mb-1.5">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Arrival Target</span>
+                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                </div>
+                <h4 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight flex items-baseline md:justify-end gap-3">
+                  <span className="text-[10px] font-bold text-gray-400 truncate opacity-60">
+                    {leg.destinationDetails?.name?.slice(0, 30) || 'Loading Intel...'}
+                  </span>
+                  {leg.destination}
+                </h4>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800/80 rounded-xl border border-gray-100 dark:border-gray-800">
+                <DollarSign size={12} className="text-emerald-500" />
+                <span className="text-[10px] font-black text-gray-700 dark:text-gray-300">${(leg.costs?.total || 0).toLocaleString()} <span className="text-[8px] opacity-60">EST</span></span>
+              </div>
+              {hasRestricted && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-rose-50 dark:bg-rose-900/30 rounded-xl border border-rose-100 dark:border-rose-900/50 animate-pulse text-rose-600 dark:text-rose-400 shadow-sm">
+                  <ShieldAlert size={12} />
+                  <span className="text-[10px] font-black uppercase">Restricted Airspace Alert</span>
+                </div>
+              )}
+              {suggestedAircraftDetails && leg.distance > suggestedAircraftDetails.range * 0.85 && (
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 dark:bg-amber-900/30 rounded-xl border border-amber-100 dark:border-amber-900/50 text-amber-600 dark:text-amber-400">
+                  <Fuel size={12} />
+                  <span className="text-[10px] font-black uppercase">Range Critical</span>
+                </div>
+              )}
+              <button 
+                onClick={() => setExpanded(!expanded)}
+                className={`ml-auto px-5 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                  expanded ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-200' : 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100'
+                }`}
+              >
+                {expanded ? 'Collapse Insights' : 'Expand Strategic Intel'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {expanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="mt-8 pt-8 border-t border-gray-100 dark:border-gray-700 space-y-8 relative z-10"
+            >
+              {/* Mission Specs Dashboard */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="p-4 bg-gray-50/50 dark:bg-gray-900/60 rounded-3xl border border-gray-100 dark:border-gray-800">
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Fuel Burn Strategy</p>
+                  <p className="text-lg font-black text-gray-900 dark:text-white">
+                    {Math.round(leg.fuelBurn).toLocaleString()} <span className="text-[10px] text-gray-400">kg</span>
+                  </p>
+                </div>
+                <div className="p-4 bg-gray-50/50 dark:bg-gray-900/60 rounded-3xl border border-gray-100 dark:border-gray-800">
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Operational Altitude</p>
+                  <p className="text-lg font-black text-gray-900 dark:text-white">
+                    FL{Math.round(leg.altitude / 100) || '---'}
+                  </p>
+                </div>
+                <div className="p-4 bg-gray-50/50 dark:bg-gray-900/60 rounded-3xl border border-gray-100 dark:border-gray-800">
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Runway Length (Dest)</p>
+                  <p className="text-lg font-black text-gray-900 dark:text-white">
+                    {leg.destinationDetails?.runwayLength?.toLocaleString() || '---'} <span className="text-[10px] text-gray-400">ft</span>
+                  </p>
+                </div>
+                <div className="p-4 bg-gray-50/50 dark:bg-gray-900/60 rounded-3xl border border-gray-100 dark:border-gray-800">
+                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Customs Access</p>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2.5 h-2.5 rounded-full ${leg.destinationDetails?.customsAvailable ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-amber-500'}`} />
+                    <p className="text-lg font-black text-gray-900 dark:text-white">
+                      {leg.destinationDetails?.customsAvailable ? 'AOE Ready' : 'Restricted'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Tactical Operations Center */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between px-1">
+                    <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2">
+                       <FileText size={12} /> STRATEGIC ORDERS & DISPATCH REMARKS
+                    </label>
+                  </div>
+                  <textarea
+                    value={leg.operationalNotes || ''}
+                    onChange={(e) => onNoteChange(idx, e.target.value)}
+                    placeholder="Input tactical notes, pax preferences, or en-route tactical changes..."
+                    className="w-full p-5 bg-gray-50/50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-3xl text-sm text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all min-h-[160px] shadow-inner font-medium leading-relaxed"
+                  />
+                </div>
+
+                {/* Advanced Logistics - Request #1 Breakdown Section */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between px-1">
+                    <h5 className="text-[10px] font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2">
+                      <Zap size={12} /> ADVANCED LOGISTICS & SAFETY DATA
+                    </h5>
+                    <button 
+                      onClick={() => setShowLogistics(!showLogistics)}
+                      className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 hover:scale-105 transition-transform"
+                    >
+                      {showLogistics ? 'Show Basic Overview' : 'View Detailed Breakdown'}
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {/* Primary Support Node */}
+                    <div className="p-4 bg-white dark:bg-gray-950 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm flex items-center justify-between group hover:border-indigo-300 transition-all">
+                       <div className="flex items-center gap-4">
+                         <div className="w-10 h-10 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center text-indigo-600">
+                           <Users size={16} />
+                         </div>
+                         <div>
+                           <p className="text-[8px] font-bold text-gray-400 uppercase">Strategic Handler ({leg.destination})</p>
+                           <p className="text-xs font-black text-gray-900 dark:text-white truncate max-w-[180px]">
+                             {leg.selectedHandlingAgent?.companyName || 'Dispatch Pending...'}
+                           </p>
+                         </div>
+                       </div>
+                       <button onClick={() => setActiveTab('handling')} className="px-4 py-2 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 rounded-lg text-[10px] font-black uppercase hover:bg-indigo-600 hover:text-white transition-all">Select</button>
+                    </div>
+
+                    <AnimatePresence>
+                      {showLogistics && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          className="space-y-3 overflow-hidden"
+                        >
+                          <div className="p-5 bg-indigo-50/30 dark:bg-indigo-900/10 rounded-3xl border border-indigo-100 dark:border-indigo-800/50 space-y-5">
+                            <div>
+                               <p className="text-[10px] font-black text-gray-400 uppercase mb-3 flex items-center gap-2">
+                                 <Globe size={10} /> FIR TRANSITIONS & CLEARANCE PATH
+                               </p>
+                               <div className="flex flex-wrap gap-2">
+                                 {leg.firs && leg.firs.length > 0 ? leg.firs.map((fir: any, fIdx: number) => (
+                                   <div key={fIdx} className="px-3 py-1.5 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 text-[10px] font-black text-indigo-600 flex items-center gap-2 shadow-sm">
+                                      {fir.firCode} <span className="opacity-40 text-gray-400">|</span> <span className="text-gray-900 dark:text-white">${fir.overflightCharge || 0}</span>
+                                   </div>
+                                 )) : <p className="text-[10px] text-gray-500 italic">No FIR transition data resolved for this segment.</p>}
+                               </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                               <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700">
+                                 <p className="text-[9px] font-black text-gray-400 uppercase mb-1">Clearances</p>
+                                 <div className="flex items-center gap-2">
+                                    <ShieldCheck size={14} className="text-emerald-500" />
+                                    <p className="text-xs font-black">{(leg.permits?.length || 0)} Secured</p>
+                                 </div>
+                               </div>
+                               <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700">
+                                 <p className="text-[9px] font-black text-gray-400 uppercase mb-1">Risk Profile</p>
+                                 <p className="text-xs font-black text-emerald-500 uppercase tracking-tighter">Low Intensity</p>
+                               </div>
+                            </div>
+                            <div className="pt-2">
+                               <p className="text-[10px] font-black text-gray-400 uppercase mb-2">Segment Waypoints</p>
+                               <div className="flex flex-wrap gap-2">
+                                 {leg.routeWaypoints?.slice(0, 8).map((wp: string, i: number) => (
+                                   <span key={i} className="text-[9px] font-mono text-indigo-600 bg-white dark:bg-gray-800 px-2 py-0.5 rounded border border-gray-100 dark:border-gray-700">{wp}</span>
+                                 ))}
+                                 {leg.routeWaypoints?.length > 8 && <span className="text-[9px] text-gray-400">+{leg.routeWaypoints.length - 8} more</span>}
+                               </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Crew Integration Section */}
+                    <div className="pt-4">
+                       <div className="flex items-center justify-between mb-3 px-1">
+                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
+                            <Users size={12} /> MISSION CREW ASSIGNMENT
+                          </p>
+                          <button onClick={() => setActiveTab('crew')} className="text-[9px] font-bold text-indigo-600 hover:underline">Manage All</button>
+                       </div>
+                       <div className="flex flex-wrap gap-2">
+                         {crewList.map((member: any) => {
+                           const isAssigned = (leg.crewAssignments || []).some((c: any) => c.id === member.id);
+                           return (
+                             <button
+                               key={member.id}
+                               onClick={() => onAssignCrew(idx, member)}
+                               className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-tight transition-all border ${
+                                 isAssigned 
+                                   ? 'bg-indigo-600 text-white border-indigo-600 shadow-md scale-105' 
+                                   : 'bg-white dark:bg-gray-950 text-gray-500 border-gray-100 dark:border-gray-800 hover:border-indigo-300'
+                               }`}
+                             >
+                               {member.name}
+                             </button>
+                           );
+                         })}
+                       </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.div>
+  );
+};
+
+export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg, formData, onFormDataChange, currentQuoteLegs, setActiveMapInput }: AIPlannerProps) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [missionType, setMissionType] = useState<'Passenger' | 'Cargo' | 'VIP' | 'ACMI Lease'>('Passenger');
@@ -39,6 +338,66 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
   const [hoveredLegIndex, setHoveredLegIndex] = useState<number | null>(null);
   const [quotaError, setQuotaError] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const handleRefreshHandlingAgents = async (legIdx: number, type: 'departure' | 'destination') => {
+    if (!plan) return;
+    setLoading(true);
+    setQuotaError(false);
+    try {
+      const icao = type === 'departure' ? plan.legs[legIdx].departure : plan.legs[legIdx].destination;
+      const details = type === 'departure' ? plan.legs[legIdx].departureDetails : plan.legs[legIdx].destinationDetails;
+      
+      const result = await searchHandlingAgents(
+        icao, 
+        details?.name, 
+        details?.city, 
+        plan.suggestedAircraft, 
+        true
+      );
+      
+      const newLegs = [...plan.legs];
+      if (type === 'departure') {
+        newLegs[legIdx].departureHandlingAgents = result.agents || [];
+      } else {
+        newLegs[legIdx].handlingAgents = result.agents || [];
+      }
+      
+      onPlanChange({ ...plan, legs: newLegs });
+    } catch (error) {
+      console.error('Refresh Handling Agents Error:', error);
+      if (error instanceof Error && (error.message.includes('Quota') || error.message.includes('429'))) {
+        setQuotaError(true);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefreshAirportDetails = async (legIdx: number, type: 'departure' | 'destination') => {
+    if (!plan) return;
+    setLoading(true);
+    setQuotaError(false);
+    try {
+      const icao = type === 'departure' ? plan.legs[legIdx].departure : plan.legs[legIdx].destination;
+      const details = await getAirportDetails(icao, true);
+      
+      const newLegs = [...plan.legs];
+      if (type === 'departure') {
+        newLegs[legIdx].departureDetails = details;
+      } else {
+        newLegs[legIdx].destinationDetails = details;
+      }
+      
+      onPlanChange({ ...plan, legs: newLegs });
+    } catch (error) {
+      console.error('Refresh Airport Details Error:', error);
+      if (error instanceof Error && (error.message.includes('Quota') || error.message.includes('429'))) {
+        setQuotaError(true);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
   
   // New input states
   const [departure, setDeparture] = useState(formData?.departure || '');
@@ -51,9 +410,9 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
 
   useEffect(() => {
     if (formData) {
-      setDeparture(prev => prev || formData.departure || '');
-      setDestination(prev => prev || formData.destination || '');
-      setDate(prev => prev || formData.date || '');
+      if (formData.departure !== undefined) setDeparture(formData.departure);
+      if (formData.destination !== undefined) setDestination(formData.destination);
+      if (formData.date !== undefined) setDate(formData.date);
       setPassengers(prev => prev !== formData.passengers?.toString() ? formData.passengers?.toString() || '1' : prev);
     }
   }, [formData]);
@@ -179,44 +538,91 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
         legChanged = true;
       }
       if (!updatedLeg.handlingAgents) {
-        const agents = await searchHandlingAgents(updatedLeg.destination);
+        const agents = await searchHandlingAgents(
+          updatedLeg.destination, 
+          updatedLeg.destinationDetails?.name, 
+          updatedLeg.destinationDetails?.city, 
+          plan.suggestedAircraft
+        );
         updatedLeg.handlingAgents = agents?.agents || [];
+        updatedLeg.handlingAgentsLastUpdated = agents?.lastUpdated;
+        updatedLeg.isHandlingAgentsFromCache = !!agents?.isFromCache;
+        // Auto-select destination agent if NOT already selected
+        if (!updatedLeg.selectedHandlingAgent && updatedLeg.handlingAgents.length > 0) {
+          const firstAgent = updatedLeg.handlingAgents[0];
+          updatedLeg.selectedHandlingAgent = firstAgent;
+          updatedLeg.costs = {
+            ...updatedLeg.costs,
+            handling: firstAgent.baseFee || 0
+          };
+        }
         legChanged = true;
       }
       if (!updatedLeg.departureHandlingAgents) {
-        const agents = await searchHandlingAgents(updatedLeg.departure);
+        const agents = await searchHandlingAgents(
+          updatedLeg.departure, 
+          updatedLeg.departureDetails?.name, 
+          updatedLeg.departureDetails?.city, 
+          plan.suggestedAircraft
+        );
         updatedLeg.departureHandlingAgents = agents?.agents || [];
+        updatedLeg.departureHandlingAgentsLastUpdated = agents?.lastUpdated;
+        updatedLeg.isDepartureHandlingAgentsFromCache = !!agents?.isFromCache;
+        // Auto-select departure agent if NOT already selected
+        if (!updatedLeg.selectedDepartureHandlingAgent && updatedLeg.departureHandlingAgents.length > 0) {
+          const firstAgent = updatedLeg.departureHandlingAgents[0];
+          updatedLeg.selectedDepartureHandlingAgent = firstAgent;
+          updatedLeg.costs = {
+            ...updatedLeg.costs,
+            departureHandling: firstAgent.baseFee || 0
+          };
+        }
         legChanged = true;
       }
       if (!updatedLeg.firs || updatedLeg.firs.length === 0 || updatedLeg.firs.every((f: any) => !f.overflightCharge)) {
-        const firs = [];
-        const [depFIR, destFIR] = await Promise.all([
-          getAirportFIR(updatedLeg.departure),
-          getAirportFIR(updatedLeg.destination)
-        ]);
-        if (depFIR) {
-          const depDetails = await getFIRDetails(depFIR.firCode, depFIR.firName, plan.suggestedAircraft);
-          firs.push({ ...depFIR, ...depDetails });
+        const firAnalysis = await getLegFIRAnalysis(updatedLeg.departure, updatedLeg.destination, plan.suggestedAircraft);
+        const analyzedFirs = firAnalysis.firs || [];
+        
+        // Deep enrich FIRs with details (Sequential to save quota)
+        const enrichedFirs = [];
+        for (const fir of analyzedFirs) {
+          const details = await getFIRDetails(fir.firCode || fir.name, fir.firName || fir.name, plan.suggestedAircraft);
+          enrichedFirs.push({ ...fir, ...details });
+          // Small delay between calls if multiple
+          if (analyzedFirs.length > 1) await new Promise(r => setTimeout(r, 800));
         }
-        if (destFIR && destFIR.firCode !== depFIR?.firCode) {
-          const destDetails = await getFIRDetails(destFIR.firCode, destFIR.firName, plan.suggestedAircraft);
-          firs.push({ ...destFIR, ...destDetails });
-        }
-        updatedLeg.firs = firs;
 
+        updatedLeg.firs = enrichedFirs;
+        
         // Update costs based on FIRs
-        const totalOverflight = firs.reduce((sum, f) => sum + (f.overflightCharge || 0), 0);
-        const totalNavigation = firs.reduce((sum, f) => sum + (f.navigationCharge || 0), 0);
+        const totalOverflight = enrichedFirs.reduce((sum: number, f: any) => sum + (f.overflightCharge || 0), 0);
+        const totalNavigation = enrichedFirs.reduce((sum: number, f: any) => sum + (f.navigationCharge || 0), 0);
         
         if (updatedLeg.costs) {
-          updatedLeg.costs.overflight = totalOverflight || updatedLeg.costs.overflight;
-          updatedLeg.costs.navigation = totalNavigation || updatedLeg.costs.navigation;
+          updatedLeg.costs.overflight = totalOverflight;
+          updatedLeg.costs.navigation = totalNavigation;
           updatedLeg.costs.total = Object.entries(updatedLeg.costs)
             .filter(([k]) => k !== 'total')
             .reduce((sum, [_, v]) => sum + (typeof v === 'number' ? v : 0), 0);
         }
-        
         legChanged = true;
+      } else {
+        // Even if FIRs exist, check if they need enrichment
+        const needsEnrichment = updatedLeg.firs.some((f: any) => !f.address);
+        if (needsEnrichment) {
+          const enrichedFirs = [];
+          for (const f of updatedLeg.firs) {
+            if (f.address) {
+              enrichedFirs.push(f);
+            } else {
+              const details = await getFIRDetails(f.code || f.name, f.name, plan.suggestedAircraft);
+              enrichedFirs.push({ ...f, ...details });
+              await new Promise(r => setTimeout(r, 800));
+            }
+          }
+          updatedLeg.firs = enrichedFirs;
+          legChanged = true;
+        }
       }
       if (legChanged) changed = true;
       return updatedLeg;
@@ -229,19 +635,34 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
     setLoading(false);
   };
 
-  // Automatically fetch details when legs are added
+  // Automatically fetch details when legs are added or updated
   useEffect(() => {
     let ignore = false;
     async function doFetch() {
       if (plan && plan.legs && plan.legs.length > 0) {
-        await fetchMissingLegDetails();
+        // Check if any leg is missing details or has changed airport
+        const needsFetch = plan.legs.some((leg: any) => 
+          !leg.departureDetails || 
+          !leg.destinationDetails || 
+          !leg.handlingAgents || 
+          !leg.departureHandlingAgents ||
+          !leg.firs ||
+          leg.firs.length === 0 ||
+          leg.firs.some((f: any) => f.overflightCharge === undefined || f.navigationCharge === undefined) ||
+          (leg.departureDetails && leg.departureDetails.icao !== leg.departure) ||
+          (leg.destinationDetails && leg.destinationDetails.icao !== leg.destination)
+        );
+
+        if (needsFetch) {
+          await fetchMissingLegDetails();
+        }
       }
     }
     if (!ignore) {
       doFetch();
     }
     return () => { ignore = true; };
-  }, [plan?.legs.length]);
+  }, [plan?.legs?.map((l: any) => `${l.departure}-${l.destination}`).join(','), plan?.suggestedAircraft]);
 
   const handleFetchFIRDetails = async (legIdx: number, firIdx: number) => {
     const leg = plan.legs[legIdx];
@@ -414,25 +835,25 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
     if (!plan) return;
 
     const newLegs = [...plan.legs];
-    if (type === 'departure') {
-      newLegs[legIdx] = { 
-        ...newLegs[legIdx], 
-        selectedDepartureHandlingAgent: agent,
-        costs: {
-          ...newLegs[legIdx].costs,
-          departureHandling: agent.baseFee
-        }
-      };
-    } else {
-      newLegs[legIdx] = { 
-        ...newLegs[legIdx], 
-        selectedHandlingAgent: agent,
-        costs: {
-          ...newLegs[legIdx].costs,
-          handling: agent.baseFee
-        }
-      };
-    }
+      if (type === 'departure') {
+        newLegs[legIdx] = { 
+          ...newLegs[legIdx], 
+          selectedDepartureHandlingAgent: agent,
+          costs: {
+            ...newLegs[legIdx].costs,
+            departureHandling: agent.baseFee || 0
+          }
+        };
+      } else {
+        newLegs[legIdx] = { 
+          ...newLegs[legIdx], 
+          selectedHandlingAgent: agent,
+          costs: {
+            ...newLegs[legIdx].costs,
+            handling: agent.baseFee || 0
+          }
+        };
+      }
     
     // Recalculate total cost
     const legsCost = newLegs.reduce((acc: number, l: any) => {
@@ -444,7 +865,7 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
       return acc + (legTotal as number);
     }, 0);
 
-    onPlanChange({ ...plan, legs: newLegs, totalCost: legsCost });
+    onPlanChange({ ...plan, legs: newLegs, totalCost: legsCost + (plan.initialHandlingCost || 0) });
   };
 
   const handleSuggestStops = async () => {
@@ -732,7 +1153,7 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
           if (leg.destination) {
             const agentsResult = await searchHandlingAgents(leg.destination);
             if (agentsResult && agentsResult.agents) {
-              leg.handlingAgents = agentsResult.agents;
+              leg.handlingAgents = agentsResult.agents.slice(0, 3);
             }
           }
 
@@ -740,7 +1161,7 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
           if (leg.departure) {
             const depAgentsResult = await searchHandlingAgents(leg.departure);
             if (depAgentsResult && depAgentsResult.agents) {
-              leg.departureHandlingAgents = depAgentsResult.agents;
+              leg.departureHandlingAgents = depAgentsResult.agents.slice(0, 3);
             }
           }
 
@@ -823,9 +1244,15 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
               <input
                 type="text"
                 value={departure}
-                onChange={(e) => setDeparture(e.target.value)}
+                onFocus={() => setActiveMapInput?.('departure')}
+                onChange={(e) => {
+                  setDeparture(e.target.value);
+                  if (onFormDataChange && formData) {
+                    onFormDataChange({ ...formData, departure: e.target.value.toUpperCase() });
+                  }
+                }}
                 placeholder="ICAO / City"
-                className="w-full pl-9 pr-3 py-2.5 bg-white dark:bg-gray-800 border-2 border-indigo-100 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-700 dark:text-white outline-none focus:border-indigo-500"
+                className="w-full pl-9 pr-3 py-2.5 bg-white dark:bg-gray-800 border-2 border-indigo-100 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-700 dark:text-white outline-none focus:border-indigo-500 hover:border-indigo-300 transition-colors cursor-pointer"
               />
             </div>
           </div>
@@ -836,9 +1263,15 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
               <input
                 type="text"
                 value={destination}
-                onChange={(e) => setDestination(e.target.value)}
+                onFocus={() => setActiveMapInput?.('destination')}
+                onChange={(e) => {
+                  setDestination(e.target.value);
+                  if (onFormDataChange && formData) {
+                    onFormDataChange({ ...formData, destination: e.target.value.toUpperCase() });
+                  }
+                }}
                 placeholder="ICAO / City"
-                className="w-full pl-9 pr-3 py-2.5 bg-white dark:bg-gray-800 border-2 border-indigo-100 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-700 dark:text-white outline-none focus:border-indigo-500"
+                className="w-full pl-9 pr-3 py-2.5 bg-white dark:bg-gray-800 border-2 border-indigo-100 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-700 dark:text-white outline-none focus:border-indigo-500 hover:border-indigo-300 transition-colors cursor-pointer"
               />
             </div>
           </div>
@@ -1100,45 +1533,83 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="bg-indigo-600 dark:bg-indigo-900 p-6 rounded-3xl text-white shadow-xl shadow-indigo-100 dark:shadow-none"
+          className="bg-gradient-to-br from-indigo-600 to-indigo-800 dark:from-indigo-900 dark:to-indigo-950 p-6 rounded-3xl text-white shadow-xl shadow-indigo-200 dark:shadow-none"
         >
           <div className="flex justify-between items-start mb-6">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Selected Aircraft</p>
-              <div className="relative group">
-                <select 
-                  value={plan.suggestedAircraft}
-                  onChange={(e) => onPlanChange({ ...plan, suggestedAircraft: e.target.value })}
-                  className="text-2xl font-black bg-transparent border-none outline-none cursor-pointer hover:opacity-80 appearance-none pr-6"
-                >
-                  {uniqueAircraftTypes.map(type => (
-                    <option key={type} value={type} className="bg-indigo-600 dark:bg-indigo-900 text-white">
-                      {type}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 opacity-50 group-hover:opacity-100 transition-opacity pointer-events-none" size={16} />
+              <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Active Mission Aircraft</p>
+              <div className="flex items-center gap-3">
+                <div className="relative group">
+                  <select 
+                    value={plan.suggestedAircraft}
+                    onChange={(e) => onPlanChange({ ...plan, suggestedAircraft: e.target.value })}
+                    className="text-2xl font-black bg-white/10 dark:bg-black/20 px-3 py-1 rounded-xl border-none outline-none cursor-pointer hover:bg-white/20 transition-all appearance-none pr-8"
+                  >
+                    {uniqueAircraftTypes.map(type => (
+                      <option key={type} value={type} className="bg-indigo-600 dark:bg-indigo-900 text-white">
+                        {type}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 opacity-70 group-hover:opacity-100 transition-opacity pointer-events-none" size={16} />
+                </div>
+                {suggestedAircraftDetails && (
+                  <div className="flex items-center gap-2 bg-white/10 dark:bg-black/20 px-3 py-1 rounded-full border border-white/10">
+                    <Zap size={12} className="text-amber-300" />
+                    <span className="text-[10px] font-black uppercase tracking-widest">{suggestedAircraftDetails.range?.toLocaleString()} NM Range</span>
+                  </div>
+                )}
               </div>
             </div>
-            <div className="bg-white/20 dark:bg-black/20 p-2 rounded-xl">
-              <Plane size={24} />
+            <div className="bg-white/20 dark:bg-black/20 p-3 rounded-2xl backdrop-blur-md border border-white/10">
+              <Plane size={32} className="text-indigo-100" />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-white/10 dark:bg-black/20 p-3 rounded-2xl">
-              <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Est. Cost</p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white/10 dark:bg-black/20 p-3 rounded-2xl border border-white/5">
+              <div className="flex items-center gap-1.5 opacity-70 mb-1">
+                <DollarSign size={12} />
+                <p className="text-[10px] font-bold uppercase tracking-widest">Mission Cost</p>
+              </div>
               <p className="text-xl font-black">${plan.totalCost?.toLocaleString()}</p>
             </div>
-            <div className="bg-white/10 dark:bg-black/20 p-3 rounded-2xl">
-              <p className="text-[10px] font-bold uppercase tracking-widest opacity-70 mb-1">Total Distance</p>
+            <div className="bg-white/10 dark:bg-black/20 p-3 rounded-2xl border border-white/5">
+              <div className="flex items-center gap-1.5 opacity-70 mb-1">
+                <Globe size={12} />
+                <p className="text-[10px] font-bold uppercase tracking-widest">Total Distance</p>
+              </div>
               <p className="text-xl font-black">{totalDistance?.toLocaleString()} nm</p>
+            </div>
+            <div className="bg-white/10 dark:bg-black/20 p-3 rounded-2xl border border-white/5">
+              <div className="flex items-center gap-1.5 opacity-70 mb-1">
+                <Clock size={12} />
+                <p className="text-[10px] font-bold uppercase tracking-widest">Flight Time</p>
+              </div>
+              <p className="text-xl font-black">{plan.legs.reduce((acc: number, l: any) => acc + (l.flightTime || 0), 0).toFixed(1)} hrs</p>
+            </div>
+            <div className="bg-white/10 dark:bg-black/20 p-3 rounded-2xl border border-white/5">
+              <div className="flex items-center gap-1.5 opacity-70 mb-1">
+                <Fuel size={12} />
+                <p className="text-[10px] font-bold uppercase tracking-widest">Fuel Burn</p>
+              </div>
+              <p className="text-xl font-black">{plan.legs.reduce((acc: number, l: any) => acc + (l.fuelBurn || 0), 0).toLocaleString()} lbs</p>
             </div>
           </div>
 
-          <div className="mt-6 flex items-center gap-2 text-xs font-bold bg-white/10 dark:bg-black/20 p-3 rounded-2xl">
-            <Info size={14} />
-            <span>Full operational breakdown generated in the results panel.</span>
+          <div className="mt-4 flex items-center justify-between bg-white/10 dark:bg-black/20 p-3 rounded-2xl border border-white/5">
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${quotaError ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+              <span className="text-[10px] font-bold uppercase tracking-widest opacity-80">
+                {quotaError ? 'Service Running in Fallback Mode' : 'AI Mission Strategy Optimized'}
+              </span>
+            </div>
+            <div className="flex items-center gap-4">
+              <button onClick={generatePDF} className="flex items-center gap-1.5 hover:text-indigo-200 transition-colors">
+                <Download size={14} />
+                <span className="text-[10px] font-bold uppercase tracking-widest">Export PDF</span>
+              </button>
+            </div>
           </div>
         </motion.div>
       )}
@@ -1207,6 +1678,22 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
         </motion.div>
       )}
 
+      {quotaError && (
+        <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl flex items-center gap-3">
+          <AlertTriangle className="text-amber-600 shrink-0" size={20} />
+          <div className="flex-1">
+            <p className="text-xs font-black text-amber-900 dark:text-amber-200 uppercase tracking-widest">AI Service Busy (Quota Exceeded)</p>
+            <p className="text-[10px] text-amber-700 dark:text-amber-400 mt-0.5">We're experiencing high demand. Some live lookups (like handling agents or FIR details) might use cached data or be unavailable for a minute. Please try again soon.</p>
+          </div>
+          <button 
+            onClick={() => setQuotaError(false)}
+            className="text-[10px] font-black uppercase text-amber-600 hover:text-amber-700 underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {analyzing && (
         <div className="flex items-center justify-center gap-2 p-8 bg-white dark:bg-gray-800 rounded-3xl border border-dashed border-gray-200 dark:border-gray-700">
           <Loader2 className="animate-spin text-indigo-600 dark:text-indigo-400" size={20} />
@@ -1259,472 +1746,54 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
               {activeTab === 'itinerary' && (
                 <div className="space-y-6">
                   {/* Flight Itinerary with Integrated Safety Data */}
-                  <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
-                    <div className="flex items-center justify-between mb-6">
-                      <div className="flex items-center gap-2">
-                        <MapPin size={20} className="text-indigo-600 dark:text-indigo-400" />
-                        <h3 className="text-lg font-black text-gray-900 dark:text-white">Flight Itinerary & Safety</h3>
-                      </div>
-                      <button
-                        onClick={fetchMissingLegDetails}
-                        disabled={loading}
-                        className="text-[10px] font-bold uppercase tracking-widest text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors"
-                      >
-                        {loading ? 'Refreshing...' : 'Refresh All Airport Data'}
-                      </button>
+                  <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-8 opacity-[0.02] pointer-events-none">
+                      <Route size={160} />
                     </div>
-                    <div className="space-y-4">
-                      {plan.legs.map((leg: any, idx: number) => {
-                        const legNotams = plan.safety?.notams?.filter((n: any) => 
-                          n.airport === leg.departure || n.airport === leg.destination
-                        ) || [];
-                        const legWeather = plan.safety?.weather?.filter((w: any) => 
-                          w.location === leg.departure || w.location === leg.destination
-                        ) || [];
-
-                        return (
-                          <div 
-                            key={idx} 
-                            className="space-y-3 relative group"
-                            onMouseEnter={() => {
-                              setHoveredLegIndex(idx);
-                              onHoverLeg?.(idx);
-                            }}
-                            onMouseLeave={() => {
-                              setHoveredLegIndex(null);
-                              onHoverLeg?.(null);
-                            }}
-                          >
-                            <div className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border border-gray-100 dark:border-gray-800 group-hover:border-indigo-300 dark:group-hover:border-indigo-500 transition-all">
-                              <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-full flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold shrink-0">
-                                {idx + 1}
-                              </div>
-                              <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <div>
-                                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">From</p>
-                                  <p className="text-sm font-black text-gray-900 dark:text-white">{leg.departure}</p>
-                                </div>
-                                <div>
-                                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">To</p>
-                                  <p className="text-sm font-black text-gray-900 dark:text-white">{leg.destination}</p>
-                                </div>
-                                <div>
-                                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">Distance</p>
-                                  <div className="flex items-center gap-2">
-                                    <p className="text-sm font-black text-gray-900 dark:text-white">{leg.distance} nm</p>
-                                    {suggestedAircraftDetails && leg.distance > suggestedAircraftDetails.range * 0.85 && (
-                                      <button 
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setActiveTab('fuel');
-                                          handleSuggestStops();
-                                        }}
-                                        className="flex items-center gap-1 text-amber-500 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase border border-amber-100 dark:border-amber-800/50 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all" 
-                                        title="Leg exceeds 85% of aircraft range. Click to find optimal fuel stops."
-                                      >
-                                        <Fuel size={8} />
-                                        <span>Range Alert: Find Stops</span>
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                                <div>
-                                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">Time</p>
-                                  <p className="text-sm font-black text-gray-900 dark:text-white">{leg.flightTime} hrs</p>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="ml-14 space-y-1.5">
-                              <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Operational Notes</label>
-                              <textarea
-                                value={leg.operationalNotes || ''}
-                                onChange={(e) => handleLegNoteChange(idx, e.target.value)}
-                                placeholder="Add specific instructions or remarks for this leg..."
-                                className="w-full p-3 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-xl text-xs text-gray-700 dark:text-gray-300 outline-none focus:border-indigo-500 transition-colors min-h-[60px] resize-none"
-                              />
-                            </div>
-
-                            {/* Crew Assignment Section */}
-                            <div className="ml-14 space-y-3">
-                              <div className="flex items-center justify-between">
-                                <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Crew Assignments</label>
-                                <div className="flex -space-x-2 overflow-hidden">
-                                  {(leg.crewAssignments || []).map((c: any) => (
-                                    <div key={c.id} className="inline-block h-6 w-6 rounded-full ring-2 ring-white dark:ring-gray-800 bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center text-[8px] font-black text-indigo-600 dark:text-indigo-400 uppercase" title={`${c.name} (${c.role})`}>
-                                      {c.name.charAt(0)}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {crewList.filter(c => c.status === 'Active').map(member => {
-                                  const isAssigned = (leg.crewAssignments || []).some((c: any) => c.id === member.id);
-                                  return (
-                                    <button
-                                      key={member.id}
-                                      onClick={() => handleAssignCrew(idx, member)}
-                                      className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-tight transition-all border ${
-                                        isAssigned 
-                                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
-                                          : 'bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-400 border-gray-100 dark:border-gray-800 hover:border-indigo-200 dark:hover:border-indigo-500/50'
-                                      }`}
-                                    >
-                                      {member.name} ({member.role.charAt(0)})
-                                    </button>
-                                  );
-                                })}
-                                {crewList.length === 0 && (
-                                  <p className="text-[10px] text-gray-400 italic">No active crew members found. Add them in the Crew tab.</p>
-                                )}
-                              </div>
-                            </div>
-
-                            <AnimatePresence>
-                              {hoveredLegIndex === idx && (
-                                <motion.div
-                                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                                  className="absolute z-50 bottom-full left-0 mb-2 w-72 p-4 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-indigo-100 dark:border-gray-700 pointer-events-none"
-                                >
-                                  <div className="space-y-4">
-                                    <div className="flex items-center gap-2 border-b border-gray-50 dark:border-gray-700 pb-2">
-                                      <Globe size={14} className="text-indigo-600" />
-                                      <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-900 dark:text-white">Leg Details</h4>
-                                    </div>
-
-                                    <div className="space-y-3">
-                                      {/* Airport Details */}
-                                      <div className="grid grid-cols-2 gap-3">
-                                        {leg.departureDetails && (
-                                          <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded-lg border border-gray-100 dark:border-gray-800">
-                                            <p className="text-[8px] text-indigo-500 uppercase font-bold mb-1">Departure: {leg.departure}</p>
-                                            <div className="space-y-1">
-                                              <p className="text-[9px] text-gray-400">Elev: <span className="text-gray-700 dark:text-gray-200">{leg.departureDetails.elevation} ft</span></p>
-                                              <p className="text-[9px] text-gray-400">Rwy: <span className="text-gray-700 dark:text-gray-200">{leg.departureDetails.runwayLength} ft</span></p>
-                                            </div>
-                                          </div>
-                                        )}
-                                        {leg.destinationDetails && (
-                                          <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded-lg border border-gray-100 dark:border-gray-800">
-                                            <p className="text-[8px] text-indigo-500 uppercase font-bold mb-1">Arrival: {leg.destination}</p>
-                                            <div className="space-y-1">
-                                              <p className="text-[9px] text-gray-400">Elev: <span className="text-gray-700 dark:text-gray-200">{leg.destinationDetails.elevation} ft</span></p>
-                                              <p className="text-[9px] text-gray-400">Rwy: <span className="text-gray-700 dark:text-gray-200">{leg.destinationDetails.runwayLength} ft</span></p>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-
-                                      {/* FIR Charges */}
-                                      <div>
-                                        <div className="flex items-center gap-1.5 mb-1">
-                                          <Globe size={12} className="text-indigo-500" />
-                                          <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">FIR Details & Charges</p>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                          {leg.firs && leg.firs.length > 0 ? (
-                                            leg.firs.map((fir: any, i: number) => (
-                                              <div key={i} className="bg-gray-50 dark:bg-gray-900 p-2 rounded-lg border border-gray-100 dark:border-gray-800">
-                                                <div className="flex justify-between items-center mb-1">
-                                                  <p className="text-[9px] font-black text-gray-700 dark:text-gray-200 uppercase">{fir.name}</p>
-                                                  <div className="flex items-center gap-2">
-                                                    <span className="text-[8px] text-gray-400 font-bold">{fir.country}</span>
-                                                    {!fir.address && (
-                                                      <button
-                                                        onClick={() => handleFetchFIRDetails(idx, i)}
-                                                        className="text-[8px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
-                                                      >
-                                                        Fetch Details
-                                                      </button>
-                                                    )}
-                                                  </div>
-                                                </div>
-                                                {fir.address && (
-                                                  <div className="mt-2 text-[9px] text-gray-600 dark:text-gray-400 space-y-1 bg-white/50 dark:bg-black/20 p-2 rounded-lg border border-indigo-50 dark:border-indigo-900/10">
-                                                    <p className="flex justify-between">
-                                                      <span className="opacity-60 uppercase font-black text-[7px] tracking-tighter">Address:</span>
-                                                      <span className="text-right">{fir.address}</span>
-                                                    </p>
-                                                    <p className="flex justify-between">
-                                                      <span className="opacity-60 uppercase font-black text-[7px] tracking-tighter">Contact:</span>
-                                                      <span className="text-right">{fir.phone} | {fir.email}</span>
-                                                    </p>
-                                                    <div className="pt-1 mt-1 border-t border-indigo-50/50 dark:border-indigo-900/10 grid grid-cols-2 gap-2">
-                                                      <div>
-                                                        <span className="opacity-60 uppercase font-black text-[7px] tracking-tighter block mb-0.5">Overflight</span>
-                                                        <span className="font-black text-indigo-600 dark:text-indigo-400">${(fir.overflightCharge || 0).toLocaleString()}</span>
-                                                      </div>
-                                                      <div>
-                                                        <span className="opacity-60 uppercase font-black text-[7px] tracking-tighter block mb-0.5">Navigation</span>
-                                                        <span className="font-black text-indigo-600 dark:text-indigo-400">${(fir.navigationCharge || 0).toLocaleString()}</span>
-                                                      </div>
-                                                    </div>
-                                                    <div className="pt-2 mt-1 border-t border-indigo-50/50 dark:border-indigo-900/10 italic leading-tight text-gray-400">
-                                                      <span className="block font-black uppercase text-[7px] mb-1 not-italic opacity-50">Operating Rules:</span>
-                                                      {fir.rules}
-                                                    </div>
-                                                  </div>
-                                                )}
-                                                <div className="grid grid-cols-2 gap-2 mt-2">
-                                                  <div>
-                                                    <p className="text-[7px] text-gray-400 uppercase font-bold">Overflight</p>
-                                                    <p className="text-[10px] font-mono text-emerald-500">${fir.overflightCharge?.toLocaleString() || 0}</p>
-                                                  </div>
-                                                  <div>
-                                                    <p className="text-[7px] text-gray-400 uppercase font-bold">Nav</p>
-                                                    <p className="text-[10px] font-mono text-emerald-500">${fir.navigationCharge?.toLocaleString() || 0}</p>
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            ))
-                                          ) : (
-                                            <div className="grid grid-cols-2 gap-2">
-                                              <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded-lg">
-                                                <p className="text-[8px] text-gray-400 uppercase font-bold">Overflight</p>
-                                                <p className="text-xs font-black text-gray-700 dark:text-gray-200">${leg.costs?.overflight?.toLocaleString() || 0}</p>
-                                              </div>
-                                              <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded-lg">
-                                                <p className="text-[8px] text-gray-400 uppercase font-bold">Navigation</p>
-                                                <p className="text-xs font-black text-gray-700 dark:text-gray-200">${leg.costs?.navigation?.toLocaleString() || 0}</p>
-                                              </div>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      {/* Handling Agents */}
-                                      <div>
-                                        <div className="flex items-center gap-1.5 mb-1">
-                                          <Users size={12} className="text-cyan-500" />
-                                          <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Handling Agent Info</p>
-                                        </div>
-                                        {leg.handlingAgents && leg.handlingAgents.length > 0 ? (
-                                          <div className="space-y-1.5">
-                                            {leg.handlingAgents.slice(0, 1).map((agent: any, i: number) => (
-                                              <div key={i} className="bg-gray-50 dark:bg-gray-900 p-2 rounded-lg border border-gray-100 dark:border-gray-800 text-[9px] text-gray-600 dark:text-gray-400 space-y-0.5">
-                                                <p className="font-bold text-gray-800 dark:text-gray-200">{agent.companyName}</p>
-                                                <p>{agent.phone} | {agent.email}</p>
-                                                <p className="italic text-[8px] truncate">{agent.additionalServices}</p>
-                                                <p className="font-mono text-cyan-600 dark:text-cyan-400">Base Fee: ${agent.baseFee?.toLocaleString() || 0}</p>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        ) : (
-                                          <p className="text-[8px] text-gray-400 italic">No agent info available</p>
-                                        )}
-                                      </div>
-
-                                      {/* Permits */}
-                                      <div>
-                                        <div className="flex items-center gap-1.5 mb-1">
-                                          <FileText size={12} className="text-blue-500" />
-                                          <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Required Permits</p>
-                                        </div>
-                                        <div className="flex flex-wrap gap-1">
-                                          {leg.permits && leg.permits.length > 0 ? (
-                                            leg.permits.map((p: any, i: number) => (
-                                              <span key={i} className="text-[8px] font-bold bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded uppercase">
-                                                {p.type || p}
-                                              </span>
-                                            ))
-                                          ) : (
-                                            <span className="text-[8px] text-gray-400 italic">None required</span>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      {/* Departure Handling Agents */}
-                                      <div>
-                                        <div className="flex items-center gap-1.5 mb-1">
-                                          <Users size={12} className="text-amber-500" />
-                                          <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Departure Handling Agents ({leg.departure})</p>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                          {leg.departureHandlingAgents && leg.departureHandlingAgents.length > 0 ? (
-                                            leg.departureHandlingAgents.map((agent: any, i: number) => {
-                                              const isSelected = leg.selectedDepartureHandlingAgent?.companyName === agent.companyName;
-                                              return (
-                                                <div 
-                                                  key={i} 
-                                                  onClick={() => handleSelectAgent(idx, agent, 'departure')}
-                                                  className={`p-2 rounded-lg border cursor-pointer transition-colors ${
-                                                    isSelected 
-                                                      ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-500 dark:border-indigo-400' 
-                                                      : 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800 hover:border-amber-300 dark:hover:border-amber-600'
-                                                  }`}
-                                                >
-                                                  <div className="flex justify-between items-center mb-1">
-                                                    <p className={`text-[9px] font-black uppercase ${isSelected ? 'text-indigo-900 dark:text-indigo-200' : 'text-amber-900 dark:text-amber-200'}`}>
-                                                      {agent.companyName}
-                                                    </p>
-                                                    <span className="text-[10px] font-mono text-emerald-500">${agent.baseFee?.toLocaleString() || 0}</span>
-                                                  </div>
-                                                  <div className="flex flex-col gap-0.5">
-                                                    <p className={`text-[8px] truncate ${isSelected ? 'text-indigo-700 dark:text-indigo-300' : 'text-gray-500'}`}>{agent.email}</p>
-                                                    {agent.phone && <p className={`text-[8px] ${isSelected ? 'text-indigo-700 dark:text-indigo-300' : 'text-gray-500'}`}>{agent.phone}</p>}
-                                                    {agent.additionalServices && (
-                                                      <p className={`text-[8px] italic truncate ${isSelected ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'}`}>
-                                                        Services: {agent.additionalServices}
-                                                      </p>
-                                                    )}
-                                                  </div>
-                                                </div>
-                                              );
-                                            })
-                                          ) : (
-                                            <span className="text-[8px] text-gray-400 italic">No agents found</span>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      {/* Destination Handling Agents */}
-                                      <div>
-                                        <div className="flex items-center gap-1.5 mb-1">
-                                          <Users size={12} className="text-amber-500" />
-                                          <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Destination Handling Agents ({leg.destination})</p>
-                                        </div>
-                                        <div className="space-y-1.5">
-                                          {leg.handlingAgents && leg.handlingAgents.length > 0 ? (
-                                            leg.handlingAgents.map((agent: any, i: number) => {
-                                              const isSelected = leg.selectedHandlingAgent?.companyName === agent.companyName;
-                                              return (
-                                                <div 
-                                                  key={i} 
-                                                  onClick={() => handleSelectAgent(idx, agent)}
-                                                  className={`p-2 rounded-lg border cursor-pointer transition-colors ${
-                                                    isSelected 
-                                                      ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-500 dark:border-indigo-400' 
-                                                      : 'bg-amber-50 dark:bg-amber-900/20 border-amber-100 dark:border-amber-800 hover:border-amber-300 dark:hover:border-amber-600'
-                                                  }`}
-                                                >
-                                                  <div className="flex justify-between items-center mb-1">
-                                                    <p className={`text-[9px] font-black uppercase ${isSelected ? 'text-indigo-900 dark:text-indigo-200' : 'text-amber-900 dark:text-amber-200'}`}>
-                                                      {agent.companyName}
-                                                    </p>
-                                                    <span className="text-[10px] font-mono text-emerald-500">${agent.baseFee?.toLocaleString() || 0}</span>
-                                                  </div>
-                                                  <div className="flex flex-col gap-0.5">
-                                                    <p className={`text-[8px] truncate ${isSelected ? 'text-indigo-700 dark:text-indigo-300' : 'text-gray-500'}`}>{agent.email}</p>
-                                                    {agent.phone && <p className={`text-[8px] ${isSelected ? 'text-indigo-700 dark:text-indigo-300' : 'text-gray-500'}`}>{agent.phone}</p>}
-                                                    {agent.additionalServices && (
-                                                      <p className={`text-[8px] italic truncate ${isSelected ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400'}`}>
-                                                        Services: {agent.additionalServices}
-                                                      </p>
-                                                    )}
-                                                  </div>
-                                                </div>
-                                              );
-                                            })
-                                          ) : (
-                                            <span className="text-[8px] text-gray-400 italic">No agents found</span>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      {/* Restricted Airspaces */}
-                                      <div>
-                                        <div className="flex items-center gap-1.5 mb-1">
-                                          <ShieldAlert size={12} className="text-red-500" />
-                                          <p className="text-[9px] font-bold uppercase tracking-widest text-gray-400">Restricted Airspaces</p>
-                                        </div>
-                                        <div className="space-y-1">
-                                          {leg.restrictedAreas && leg.restrictedAreas.length > 0 ? (
-                                            leg.restrictedAreas.map((area: any, i: number) => (
-                                              <div key={i} className="flex items-center gap-1.5 bg-red-50 dark:bg-red-900/30 p-1.5 rounded-lg">
-                                                <div className="w-1 h-1 bg-red-500 rounded-full" />
-                                                <p className="text-[8px] font-bold text-red-700 dark:text-red-400 uppercase">{area.name || area}</p>
-                                              </div>
-                                            ))
-                                          ) : (
-                                            <span className="text-[8px] text-gray-400 italic">No restrictions detected</span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-
-                            {(legNotams.length > 0 || legWeather.length > 0) && (
-                              <div className="ml-14 grid grid-cols-1 md:grid-cols-2 gap-3">
-                                {legNotams.map((n: any, i: number) => (
-                                  <div key={i} className={`flex items-start gap-2 p-2 rounded-xl border ${
-                                    n.severity === 'High' ? 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/30' :
-                                    n.severity === 'Medium' ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-100 dark:border-amber-900/30' :
-                                    'bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-900/30'
-                                  }`}>
-                                    <ShieldAlert size={14} className={`shrink-0 mt-0.5 ${
-                                      n.severity === 'High' ? 'text-red-600 dark:text-red-400' :
-                                      n.severity === 'Medium' ? 'text-amber-600 dark:text-amber-400' :
-                                      'text-blue-600 dark:text-blue-400'
-                                    }`} />
-                                    <div>
-                                      <p className={`text-[10px] font-bold uppercase tracking-widest ${
-                                        n.severity === 'High' ? 'text-red-900 dark:text-red-200' :
-                                        n.severity === 'Medium' ? 'text-amber-900 dark:text-amber-200' :
-                                        'text-blue-900 dark:text-blue-200'
-                                      }`}>NOTAM: {n.airport}</p>
-                                      <p className={`text-[10px] leading-tight ${
-                                        n.severity === 'High' ? 'text-red-800 dark:text-red-400' :
-                                        n.severity === 'Medium' ? 'text-amber-800 dark:text-amber-400' :
-                                        'text-blue-800 dark:text-blue-400'
-                                      }`}>{n.description}</p>
-                                    </div>
-                                  </div>
-                                ))}
-                                {legWeather.map((w: any, i: number) => (
-                                  <div key={i} className={`flex items-start gap-2 p-2 rounded-xl border ${
-                                    w.severity === 'High' ? 'bg-red-50 dark:bg-red-900/10 border-red-100 dark:border-red-900/30' :
-                                    w.severity === 'Medium' ? 'bg-amber-50 dark:bg-amber-900/10 border-amber-100 dark:border-amber-900/30' :
-                                    'bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-900/30'
-                                  }`}>
-                                    <Cloud size={14} className={`shrink-0 mt-0.5 ${
-                                      w.severity === 'High' ? 'text-red-600 dark:text-red-400' :
-                                      w.severity === 'Medium' ? 'text-amber-600 dark:text-amber-400' :
-                                      'text-blue-600 dark:text-blue-400'
-                                    }`} />
-                                    <div>
-                                      <p className={`text-[10px] font-bold uppercase tracking-widest ${
-                                        w.severity === 'High' ? 'text-red-900 dark:text-red-200' :
-                                        w.severity === 'Medium' ? 'text-amber-900 dark:text-amber-200' :
-                                        'text-blue-900 dark:text-blue-200'
-                                      }`}>Weather: {w.location}</p>
-                                      <p className={`text-[10px] leading-tight ${
-                                        w.severity === 'High' ? 'text-red-800 dark:text-red-400' :
-                                        w.severity === 'Medium' ? 'text-amber-800 dark:text-amber-400' :
-                                        'text-blue-800 dark:text-blue-400'
-                                      }`}>{w.condition} - {w.impact}</p>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                    
+                    <div className="flex items-center justify-between mb-8 relative z-10">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-indigo-200">
+                          <ListOrdered size={20} />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-black text-gray-900 dark:text-white uppercase tracking-tighter leading-none mb-1">Strategic Mission Flow</h3>
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none">Operational Sequence & Logistics</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={fetchMissingLegDetails}
+                          disabled={loading}
+                          className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-100 transition-all border border-indigo-100 dark:border-indigo-800"
+                        >
+                          {loading ? <Loader2 className="animate-spin" size={12} /> : <Activity size={12} />}
+                          <span>Sync Leg Analytics</span>
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-4 relative">
+                      {/* Vertical line connector */}
+                      <div className="absolute left-[27px] top-8 bottom-8 w-0.5 bg-gray-100 dark:bg-gray-800/50 hidden md:block" />
+                      
+                      {plan.legs.map((leg: any, idx: number) => (
+                        <LegCard 
+                          key={idx}
+                          leg={leg}
+                          idx={idx}
+                          onHover={onHoverLeg}
+                          onNoteChange={handleLegNoteChange}
+                          onAssignCrew={handleAssignCrew}
+                          crewList={crewList}
+                          suggestedAircraftDetails={suggestedAircraftDetails}
+                          setActiveTab={setActiveTab}
+                          handleSuggestStops={handleSuggestStops}
+                          hoveredLegIndex={hoveredLegIndex}
+                        />
+                      ))}
                     </div>
                   </div>
-
-                  {/* General Safety Alerts (for items not tied to specific legs) */}
-                  {plan.safety && (
-                    <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
-                      <div className="flex items-center gap-2 mb-6">
-                        <ShieldAlert size={20} className="text-indigo-600 dark:text-indigo-400" />
-                        <h3 className="text-lg font-black text-gray-900 dark:text-white">General Safety & Operational Alerts</h3>
-                      </div>
-                      <WeatherNotamPanel 
-                        notams={plan.safety.notams?.filter((n: any) => 
-                          !plan.legs.some((l: any) => l.departure === n.airport || l.destination === n.airport)
-                        ) || []} 
-                        weather={plan.safety.weather?.filter((w: any) => 
-                          !plan.legs.some((l: any) => l.departure === w.location || l.destination === w.location)
-                        ) || []} 
-                      />
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -1816,15 +1885,49 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
                     legs={plan.legs}
                     departure={plan.legs[0].departure}
                     destination={plan.legs[plan.legs.length - 1].destination}
+                    onLegsChange={(newLegs) => {
+                      const totalCost = newLegs.reduce((sum, l) => sum + (l.costs?.total || 0), 0) + (plan.initialHandlingCost || 0);
+                      onPlanChange({ ...plan, legs: newLegs, totalCost });
+                    }}
                   />
                 </div>
               )}
 
               {activeTab === 'handling' && (
-                <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm relative overflow-hidden">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-2xl">
+                        <Users size={24} className="text-amber-600 dark:text-amber-400" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-black text-gray-900 dark:text-white uppercase tracking-tight">Ground Handling Network</h3>
+                        <p className="text-xs text-gray-500 font-medium">Select and manage FBO services for each leg of the mission.</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={async () => {
+                        for(let i=0; i<plan.legs.length; i++) {
+                           await handleRefreshHandlingAgents(i, 'departure');
+                           await handleRefreshHandlingAgents(i, 'destination');
+                        }
+                      }}
+                      disabled={loading}
+                      className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-black shadow-lg shadow-indigo-500/25 hover:bg-indigo-700 transition-all group disabled:opacity-50"
+                    >
+                      {loading ? (
+                        <Loader2 size={18} className="animate-spin" />
+                      ) : (
+                        <Zap size={18} className="group-hover:scale-110 transition-transform" />
+                      )}
+                      <span className="uppercase tracking-widest text-[11px]">Audit All Agents</span>
+                    </button>
+                  </div>
                   <HandlingAgentsPanel 
                     legs={plan.legs}
                     onSelectAgent={handleSelectAgent}
+                    onRefreshAgents={handleRefreshHandlingAgents}
+                    loading={loading}
                   />
                 </div>
               )}

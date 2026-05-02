@@ -11,6 +11,7 @@ import {
   getDocFromServer
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
+import { safeStringify } from '../utils/safeJson';
 
 export enum OperationType {
   CREATE = 'create',
@@ -59,8 +60,8 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.error('Firestore Error: ', safeStringify(errInfo));
+  throw new Error(safeStringify(errInfo));
 }
 
 export interface Operator {
@@ -81,6 +82,9 @@ export interface Operator {
   phone?: string;
   founded_year?: number;
   fleet_size?: number;
+  fleet_quantity?: number;
+  avg_fleet_age?: number;
+  aircraft_types_operated?: string[];
   last_fleet_update?: string;
   lastContacted?: string;
   manual_notes?: string;

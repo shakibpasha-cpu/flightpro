@@ -20,6 +20,7 @@ import {
 import { db } from '../firebase';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { calculateAvailability, AvailabilityStatus } from '../services/availabilityService';
+import { isAiInCooldown } from '../services/aiService';
 
 interface AircraftIntelligence {
   id: string;
@@ -47,39 +48,91 @@ export default function AvailabilityIntelligence() {
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchIntelligence = async (aircraftDocs: any[]) => {
-    // Process aircraft in small batches to avoid overwhelming the browser's fetch queue
-    const batchSize = 3;
-    const results: AircraftIntelligence[] = [];
+    setLoading(true);
     
-    for (let i = 0; i < aircraftDocs.length; i += batchSize) {
-      const batch = aircraftDocs.slice(i, i + batchSize);
-      const batchResults = await Promise.all(batch.map(async (doc) => {
-        const data = doc.data();
-        const reg = (data.registration || data.tail_number || '').trim();
-        const availability = await calculateAvailability(doc.id, data.icao24, reg);
-        return {
-          id: doc.id,
-          registration: reg || 'Unknown',
-          type: data.type || 'Unknown',
-          operator: data.operator || 'Unknown',
-          base: data.base || 'Unknown',
-          icao24: data.icao24,
+    // 1. Initial Load: Set basic aircraft data immediately
+    const initialResults = aircraftDocs.map(doc => {
+      const data = doc.data();
+      const reg = (data.registration || data.tail_number || '').trim();
+      return {
+        id: doc.id,
+        registration: reg || 'Unknown',
+        type: data.type || 'Unknown',
+        operator: data.operator || 'Unknown',
+        base: data.base || 'Unknown',
+        icao24: data.icao24,
+        status: 'On Request' as AvailabilityStatus,
+        reason: 'Scanning pending...',
+        lastUpdated: new Date().toISOString()
+      };
+    });
+    setAircraft(initialResults);
+    
+    // 2. Intelligence Merge: Try to load existing intelligence for all at once
+    try {
+      const { getDocs, collection } = await import('firebase/firestore');
+      const intelSnapshot = await getDocs(collection(db, 'availability_intelligence'));
+      const intelMap = new Map();
+      intelSnapshot.docs.forEach(doc => intelMap.set(doc.id, doc.data()));
+      
+      const mergedResults = initialResults.map(a => {
+        const cacheReg = a.registration || a.id;
+        const cacheId = `avail_${cacheReg}_${a.icao24 || 'no_base'}`.toLowerCase();
+        const cached = intelMap.get(cacheId);
+        
+        if (cached) {
+          return {
+            ...a,
+            status: cached.status,
+            reason: cached.reason,
+            intelligence: cached.intelligence,
+            lastUpdated: cached.updatedAt
+          };
+        }
+        return a;
+      });
+      
+      setAircraft(mergedResults);
+    } catch (e) {
+      console.error('Failed to merge intelligence:', e);
+    }
+
+    setLoading(false);
+    setRefreshing(false);
+  };
+
+  const scanFleet = async () => {
+    setRefreshing(true);
+    const results = [...aircraft];
+    
+    for (let i = 0; i < results.length; i++) {
+      const a = results[i];
+      
+      // Skip if scanned recently (< 30 mins)
+      const lastUpdate = new Date(a.lastUpdated).getTime();
+      if (Date.now() - lastUpdate < 1800000 && a.reason !== 'Scanning pending...') {
+        continue;
+      }
+
+      try {
+        const availability = await calculateAvailability(a.id, a.icao24, a.registration);
+        results[i] = {
+          ...a,
           status: availability.status,
           reason: availability.reason,
           intelligence: availability.intelligence,
           lastUpdated: new Date().toISOString()
         };
-      }));
-      results.push(...batchResults);
-      
-      // Update intermediate state for smoother UI
-      if (i + batchSize < aircraftDocs.length) {
+        
         setAircraft([...results]);
+        
+        // Anti-burst delay (2 seconds between units)
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } catch (e) {
+        console.error(`Failed to scan aircraft ${a.registration}:`, e);
       }
     }
     
-    setAircraft(results);
-    setLoading(false);
     setRefreshing(false);
   };
 
@@ -91,8 +144,7 @@ export default function AvailabilityIntelligence() {
   }, []);
 
   const handleRefresh = () => {
-    setRefreshing(true);
-    // The snapshot listener will trigger fetchIntelligence
+    scanFleet();
   };
 
   const filteredAircraft = aircraft.filter(a => {
@@ -118,8 +170,9 @@ export default function AvailabilityIntelligence() {
         <div className="flex items-center gap-3">
           <button 
             onClick={handleRefresh}
-            disabled={refreshing}
-            className="p-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl text-gray-500 hover:text-indigo-600 transition shadow-sm"
+            disabled={refreshing || isAiInCooldown()}
+            className="p-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl text-gray-500 hover:text-indigo-600 transition shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            title={isAiInCooldown() ? "AI Quota Exceeded. please wait." : "Scan Fleet"}
           >
             <RefreshCw size={20} className={refreshing ? 'animate-spin' : ''} />
           </button>

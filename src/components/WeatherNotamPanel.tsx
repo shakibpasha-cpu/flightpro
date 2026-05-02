@@ -110,12 +110,25 @@ export default function WeatherNotamPanel({ notams: initialNotams, weather: init
         >
           <div className="flex items-center gap-2 mb-2 text-indigo-600 dark:text-indigo-400">
             <Cloud size={16} />
-            <span className="text-[10px] font-black uppercase tracking-widest">Live METAR: {liveWeather.airport}</span>
+            <span className="text-[10px] font-black uppercase tracking-widest">Live Weather: {liveWeather.airport}</span>
           </div>
-          <code className="text-xs font-mono text-indigo-900 dark:text-indigo-200 block bg-white dark:bg-gray-900 p-3 rounded-lg border border-indigo-100 dark:border-indigo-900/50">
-            {liveWeather.metar}
-          </code>
-          <p className="text-[9px] text-indigo-400 mt-2 font-bold uppercase tracking-widest">Last Updated: {new Date(liveWeather.last_updated).toLocaleTimeString()}</p>
+          <div className="space-y-3">
+            <div>
+              <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-widest block mb-1">METAR</span>
+              <code className="text-xs font-mono text-indigo-900 dark:text-indigo-200 block bg-white dark:bg-gray-900 p-3 rounded-lg border border-indigo-100 dark:border-indigo-900/50">
+                {liveWeather.metar}
+              </code>
+            </div>
+            {liveWeather.taf && liveWeather.taf !== "N/A" && (
+              <div>
+                <span className="text-[9px] font-bold text-indigo-500 uppercase tracking-widest block mb-1">TAF</span>
+                <code className="text-xs font-mono text-indigo-900 dark:text-indigo-200 block bg-white dark:bg-gray-900 p-3 rounded-lg border border-indigo-100 dark:border-indigo-900/50">
+                  {liveWeather.taf}
+                </code>
+              </div>
+            )}
+          </div>
+          <p className="text-[9px] text-indigo-400 mt-3 font-bold uppercase tracking-widest">Last Updated: {new Date(liveWeather.last_updated).toLocaleTimeString()}</p>
         </motion.div>
       )}
 

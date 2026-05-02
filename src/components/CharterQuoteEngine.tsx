@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plane, Clock, DollarSign, ShieldCheck, Zap, Star, Loader2, Info, ChevronDown, ChevronUp, MessageSquare, Send, Map as MapIcon, Route, FileText, Tag, Search, Globe, UserCheck, Fuel, ParkingCircle, RefreshCw, Sparkles, Package, Layers, User, Keyboard, Navigation, Moon, X, ChevronRight, Mail, Phone } from 'lucide-react';
+import { Plane, Clock, DollarSign, ShieldCheck, Zap, Star, Loader2, Info, ChevronDown, ChevronUp, MessageSquare, Send, Map as MapIcon, Route, FileText, Tag, Search, Globe, UserCheck, Fuel, ParkingCircle, RefreshCw, Sparkles, Package, Layers, User, Keyboard, Navigation, Moon, X, ChevronRight, Mail, Phone, Cloud } from 'lucide-react';
 import { generateCharterQuotes, parseNaturalLanguageQuote, getCommercialViabilitySuggestion, generateACMIQuote, getFlightRouteDetails, getSuggestedAircraft, searchHandlingAgents } from '../services/aiService';
 import { generateQuotePDF } from '../utils/pdfGenerator';
+import { safeStringify } from '../utils/safeJson';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { db, auth } from '../firebase';
@@ -243,6 +244,8 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
   const [destinationAgents, setDestinationAgents] = useState<any[]>([]);
   const [departureNotams, setDepartureNotams] = useState<any[]>([]);
   const [destinationNotams, setDestinationNotams] = useState<any[]>([]);
+  const [departureWeather, setDepartureWeather] = useState<any>(null);
+  const [destinationWeather, setDestinationWeather] = useState<any>(null);
   const [depNotamFilter, setDepNotamFilter] = useState<string>('All');
   const [destNotamFilter, setDestNotamFilter] = useState<string>('All');
   const [fetchingDepAgents, setFetchingDepAgents] = useState(false);
@@ -255,12 +258,14 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
       const fetchAgents = async () => {
         setFetchingDepAgents(true);
         try {
-          const [agentResult, notamResult] = await Promise.all([
+          const [agentResult, notamResult, weatherResult] = await Promise.all([
             searchHandlingAgents(formData.departure, formData.aircraftPreference).catch(() => ({ agents: [] })),
-            import('../services/weatherService').then(m => m.getLiveNotams(formData.departure)).catch(() => ({ notams: [] }))
+            import('../services/weatherService').then(m => m.getLiveNotams(formData.departure)).catch(() => ({ notams: [] })),
+            import('../services/weatherService').then(m => m.getLiveWeather(formData.departure)).catch(() => null)
           ]);
           setDepartureAgents(agentResult.agents || []);
           setDepartureNotams(notamResult.notams || []);
+          setDepartureWeather(weatherResult || null);
         } catch (error) {
           console.error('Error fetching departure data:', error);
         } finally {
@@ -272,6 +277,7 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
     } else {
       setDepartureAgents([]);
       setDepartureNotams([]);
+      setDepartureWeather(null);
     }
   }, [formData.departure]);
 
@@ -280,12 +286,14 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
       const fetchAgents = async () => {
         setFetchingDestAgents(true);
         try {
-          const [agentResult, notamResult] = await Promise.all([
+          const [agentResult, notamResult, weatherResult] = await Promise.all([
             searchHandlingAgents(formData.destination, formData.aircraftPreference).catch(() => ({ agents: [] })),
-            import('../services/weatherService').then(m => m.getLiveNotams(formData.destination)).catch(() => ({ notams: [] }))
+            import('../services/weatherService').then(m => m.getLiveNotams(formData.destination)).catch(() => ({ notams: [] })),
+            import('../services/weatherService').then(m => m.getLiveWeather(formData.destination)).catch(() => null)
           ]);
           setDestinationAgents(agentResult.agents || []);
           setDestinationNotams(notamResult.notams || []);
+          setDestinationWeather(weatherResult || null);
         } catch (error) {
           console.error('Error fetching destination data:', error);
         } finally {
@@ -297,6 +305,7 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
     } else {
       setDestinationAgents([]);
       setDestinationNotams([]);
+      setDestinationWeather(null);
     }
   }, [formData.destination]);
 
@@ -766,6 +775,25 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
                   </div>
                 </div>
               )}
+              {departureWeather && (
+                <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-900/30 rounded-xl border border-gray-100 dark:border-gray-800">
+                  <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-1">
+                    <Cloud size={10} /> Live Weather at {formData.departure}
+                  </p>
+                  <div className="space-y-2 text-[9px]">
+                    <div className="bg-white dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700">
+                      <span className="font-bold text-gray-700 dark:text-gray-300 block mb-1">METAR</span>
+                      <span className="font-mono text-gray-600 dark:text-gray-400 break-words">{departureWeather.metar}</span>
+                    </div>
+                    {departureWeather.taf && departureWeather.taf !== "N/A" && (
+                      <div className="bg-white dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700">
+                        <span className="font-bold text-gray-700 dark:text-gray-300 block mb-1">TAF</span>
+                        <span className="font-mono text-gray-600 dark:text-gray-400 break-words line-clamp-3" title={departureWeather.taf}>{departureWeather.taf}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               {departureNotams.length > 0 && (
                 <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-900/30 rounded-xl border border-gray-100 dark:border-gray-800">
                   <div className="flex items-center justify-between mb-2">
@@ -857,6 +885,25 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
                         </div>
                       );
                     })}
+                  </div>
+                </div>
+              )}
+              {destinationWeather && (
+                <div className="mt-2 p-3 bg-gray-50 dark:bg-gray-900/30 rounded-xl border border-gray-100 dark:border-gray-800">
+                  <p className="text-[8px] font-bold text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-1">
+                    <Cloud size={10} /> Live Weather at {formData.destination}
+                  </p>
+                  <div className="space-y-2 text-[9px]">
+                    <div className="bg-white dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700">
+                      <span className="font-bold text-gray-700 dark:text-gray-300 block mb-1">METAR</span>
+                      <span className="font-mono text-gray-600 dark:text-gray-400 break-words">{destinationWeather.metar}</span>
+                    </div>
+                    {destinationWeather.taf && destinationWeather.taf !== "N/A" && (
+                      <div className="bg-white dark:bg-gray-800 p-2 rounded border border-gray-200 dark:border-gray-700">
+                        <span className="font-bold text-gray-700 dark:text-gray-300 block mb-1">TAF</span>
+                        <span className="font-mono text-gray-600 dark:text-gray-400 break-words line-clamp-3" title={destinationWeather.taf}>{destinationWeather.taf}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1761,10 +1808,10 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
             >
               <FileText size={20} /> PDF Quote
             </button>
-            <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent('Check out these charter quotes: ' + JSON.stringify(quotesData))}`)} className="flex-1 bg-emerald-600 text-white p-4 rounded-xl font-black uppercase tracking-widest text-sm hover:bg-emerald-700 transition-all flex items-center justify-center gap-2">
+            <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent('Check out these charter quotes: ' + safeStringify(quotesData))}`)} className="flex-1 bg-emerald-600 text-white p-4 rounded-xl font-black uppercase tracking-widest text-sm hover:bg-emerald-700 transition-all flex items-center justify-center gap-2">
               <MessageSquare size={20} /> WhatsApp
             </button>
-            <button onClick={() => window.open(`mailto:?subject=Charter Quotes&body=${encodeURIComponent(JSON.stringify(quotesData))}`)} className="flex-1 bg-indigo-600 text-white p-4 rounded-xl font-black uppercase tracking-widest text-sm hover:bg-indigo-700 transition-all flex items-center justify-center gap-2">
+            <button onClick={() => window.open(`mailto:?subject=Charter Quotes&body=${encodeURIComponent(safeStringify(quotesData))}`)} className="flex-1 bg-indigo-600 text-white p-4 rounded-xl font-black uppercase tracking-widest text-sm hover:bg-indigo-700 transition-all flex items-center justify-center gap-2">
               <Send size={20} /> Email
             </button>
           </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, TrendingDown, Target, Zap, Shield, Info, Loader2, ArrowRight, MapPin, DollarSign, MessageSquare, AlertCircle, AlertTriangle, Route, Activity, Clock, BarChart3 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { getSuggestedAircraft, getEmptyLegs, getNegotiationStrategy, getFlightRouteDetails, optimizeRoute, getOperationalRiskAssessment } from '../services/aiService';
+import { getSuggestedAircraft, getEmptyLegs, getNegotiationStrategy, getFlightRouteDetails, optimizeRoute, getOperationalRiskAssessment, getFuelStopSuggestions } from '../services/aiService';
 import { db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
@@ -33,12 +33,32 @@ export default function AILayer({ missionData, selectedAircraft, currentPrice, d
   const [activeTab, setActiveTab] = useState<'prediction' | 'optimization' | 'risk' | 'emptylegs' | 'negotiation'>(defaultTab || 'prediction');
   const [optimizationCriteria, setOptimizationCriteria] = useState<string>('balanced');
   const [isReoptimizing, setIsReoptimizing] = useState(false);
+  const [fuelStopSuggestions, setFuelStopSuggestions] = useState<any>(null);
+  const [isFetchingFuelStops, setIsFetchingFuelStops] = useState(false);
 
   useEffect(() => {
     if (defaultTab) {
       setActiveTab(defaultTab);
     }
   }, [defaultTab]);
+
+  const fetchFuelStops = async () => {
+    if (!selectedAircraft) return;
+    setIsFetchingFuelStops(true);
+    try {
+      const suggestions = await getFuelStopSuggestions({
+        legs: routeAnalysis?.legs || [],
+        aircraft: selectedAircraft,
+        missionType: missionData.missionType,
+        currentDate: new Date().toISOString()
+      });
+      setFuelStopSuggestions(suggestions);
+    } catch (error) {
+      console.error('Fuel Stop Fetch Error:', error);
+    } finally {
+      setIsFetchingFuelStops(false);
+    }
+  };
 
   const reOptimizeRoute = async (criteria: string) => {
     setOptimizationCriteria(criteria);
@@ -76,35 +96,33 @@ export default function AILayer({ missionData, selectedAircraft, currentPrice, d
       const snapshot = await getDocs(collection(db, 'aircraft'));
       const allAircraft = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-      // 2. Run AI Analysis in parallel
+      // 2. Run AI Analysis sequentially to save quota
       const route = await getFlightRouteDetails(missionData.departure, missionData.destination);
       const distance = route.routingDistance || route.gcDistance;
       
-      const [aircraftSuggestions, legs, optimized, risk] = await Promise.all([
-        getSuggestedAircraft(missionData.passengers || 0, missionData.payload || 0, distance, allAircraft, missionData.departure),
-        getEmptyLegs({ 
-          searchType: 'specific', 
-          specificDeparture: missionData.departure, 
-          specificDestination: missionData.destination 
-        }),
-        optimizeRoute({
-          departure: missionData.departure,
-          destination: missionData.destination,
-          dateTime: missionData.dateTime || new Date().toISOString(),
-          aircraftType: selectedAircraft?.type || 'Standard Jet',
-          currentDate: new Date().toISOString(),
-          passengers: missionData.passengers || 0,
-          payload: missionData.payload || 0,
-          aircraftPerformance: selectedAircraft, // Pass the full aircraft object as performance data
-          optimizationCriteria: optimizationCriteria
-        }),
-        getOperationalRiskAssessment({
-          departure: missionData.departure,
-          destination: missionData.destination,
-          aircraftType: selectedAircraft?.type || 'Standard Jet',
-          dateTime: missionData.dateTime || new Date().toISOString()
-        })
-      ]);
+      const aircraftSuggestions = await getSuggestedAircraft(missionData.passengers || 0, missionData.payload || 0, distance, allAircraft, missionData.departure);
+      const legs = await getEmptyLegs({ 
+        searchType: 'specific', 
+        specificDeparture: missionData.departure, 
+        specificDestination: missionData.destination 
+      });
+      const optimized = await optimizeRoute({
+        departure: missionData.departure,
+        destination: missionData.destination,
+        dateTime: missionData.dateTime || new Date().toISOString(),
+        aircraftType: selectedAircraft?.type || 'Standard Jet',
+        currentDate: new Date().toISOString(),
+        passengers: missionData.passengers || 0,
+        payload: missionData.payload || 0,
+        aircraftPerformance: selectedAircraft, // Pass the full aircraft object as performance data
+        optimizationCriteria: optimizationCriteria
+      });
+      const risk = await getOperationalRiskAssessment({
+        departure: missionData.departure,
+        destination: missionData.destination,
+        aircraftType: selectedAircraft?.type || 'Standard Jet',
+        dateTime: missionData.dateTime || new Date().toISOString()
+      });
 
       setRouteAnalysis(route);
       setSuggestions(aircraftSuggestions);
@@ -307,6 +325,60 @@ export default function AILayer({ missionData, selectedAircraft, currentPrice, d
                           <p className="text-sm text-gray-300 italic leading-relaxed">
                             "{optimizedRoute.alternatives?.[selectedAltIndex]?.recommendation}"
                           </p>
+                        </div>
+
+                        {/* Fuel Stops Section */}
+                        <div className="p-8 border-2 border-dashed border-indigo-100 dark:border-indigo-900/40 rounded-[2rem] space-y-6">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-indigo-600 rounded-xl text-white">
+                                <Zap size={16} />
+                              </div>
+                              <div>
+                                <h4 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-tight">Optimal Fuel Stops</h4>
+                                <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">AI Technical Analysis</p>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={fetchFuelStops}
+                              disabled={isFetchingFuelStops || !selectedAircraft}
+                              className="px-4 py-2 bg-white dark:bg-gray-800 border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all disabled:opacity-50 shadow-sm"
+                            >
+                              {isFetchingFuelStops ? 'Calculating...' : 'Analyze Fuel Efficiency'}
+                            </button>
+                          </div>
+
+                          {fuelStopSuggestions ? (
+                            <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                              <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed bg-indigo-50/50 dark:bg-indigo-900/10 p-4 rounded-xl border border-indigo-50 dark:border-indigo-900/30">
+                                <span className="font-black text-indigo-600 mr-2 uppercase">Reasoning:</span>
+                                {fuelStopSuggestions.reasoning}
+                              </p>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {fuelStopSuggestions.suggestedLegs.map((leg: any, i: number) => (
+                                  <div key={i} className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black ${leg.stopType === 'fuel' ? 'bg-amber-100 text-amber-600' : 'bg-indigo-100 text-indigo-600'}`}>
+                                        {leg.stopType === 'fuel' ? '⛽' : '🏁'}
+                                      </div>
+                                      <div>
+                                        <p className="text-xs font-black text-gray-900 dark:text-white">{leg.departure} → {leg.destination}</p>
+                                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{leg.stopType === 'fuel' ? 'Fuel / Tech Stop' : 'Mission Destination'}</p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-center py-6">
+                              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest italic">
+                                {selectedAircraft 
+                                  ? "Click 'Analyze Fuel Efficiency' to detect required or strategic fuel stops."
+                                  : "Select an aircraft to enable fuel stop analysis."}
+                              </p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ) : (

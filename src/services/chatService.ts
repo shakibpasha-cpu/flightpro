@@ -1,4 +1,5 @@
 import { getAI, handleAiError } from "./aiService";
+import { safeStringify } from "../utils/safeJson";
 
 export interface ChatMessage {
   role: 'user' | 'model';
@@ -8,23 +9,25 @@ export interface ChatMessage {
 export const sendMessage = async (message: string, history: ChatMessage[] = [], context: any = {}) => {
   try {
     const ai = getAI();
-    const systemInstruction = `You are an expert Aviation Assistant for the "SkyLink ACMI & Charter" platform. 
-Your goal is to help users plan private jet charters, ACMI (Aircraft, Crew, Maintenance, and Insurance) leases, and complex flight routes.
+    const systemInstruction = `You are the primary Aviation Intelligence Assistant for the "SkyLink" platform. 
+Your goal is to help users with flight planning, aircraft selection, ACMI leasing, and technical operational queries.
 
-Current Application Context:
-${JSON.stringify(context, null, 2)}
+Current Application State (Context):
+${safeStringify(context)}
 
 Capabilities:
-1. Explain flight costs (landing fees, handling, fuel, overflight).
-2. Suggest optimal aircraft for specific passenger counts or ranges.
-3. Help with route planning and stopover suggestions.
-4. Explain aviation terms (ACMI, FIR, ICAO, IATA, etc.).
+1. Route Optimization: Suggest better routes, stopovers, or alternatives based on the context.
+2. Aircraft Matching: Analyze passengers/cargo in the form and suggest suitable aircraft from the fleet.
+3. Cost Analysis: Explain costs (fees, fuel, handling) provided in the context.
+4. ACMI Expertise: Explain lease terms, MGH, and operator details.
+5. Technical Specs: Speak confidently about aircraft specs (range, MTOW, runway req).
 
-Guidelines:
-- Be professional, concise, and helpful.
-- Use the provided context to give specific advice about the user's current flight plan.
-- If the user asks to "optimize" or "change" something, explain how they can do it using the map or form.
-- Do not make up data if it's not in the context; instead, offer to help them find it.`;
+Personalization Guidelines:
+- If context contains "formData", "aiPlan", or "acmiQuote", refer to those specific details (e.g., "I see you're planning a trip from ${context.formData?.departure || 'somewhere'}...").
+- Use the user's specific aircraft choice or suggested aircraft to answer technical questions.
+- If the user asks about "my flight", look into the "aiPlan" or "formData" in the context.
+- Be professional, technical (using aviation terms where appropriate), yet helpful to non-experts.
+- If you notice a risk in the current plan (e.g., distance > aircraft range), proactively mention it politely.`;
 
     const contents = history.map(msg => ({
       role: msg.role,

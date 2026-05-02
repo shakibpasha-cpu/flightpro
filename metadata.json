@@ -1,5 +1,7 @@
 {
   "name": "AeroPlan AI",
-  "description": "A professional, AI-powered flight planning and charter management system for aviation operations.",
-  "requestFramePermissions": ["geolocation"]
+  "description": "A professional, AI-powered flight planning and charter management system with real-time routing, fleet intelligence, and geolocation features.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
 }

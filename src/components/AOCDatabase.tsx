@@ -377,33 +377,39 @@ export default function AOCDatabase() {
   const operatorsByCountry = useMemo(() => {
     const counts: Record<string, number> = {};
     operators.forEach(op => {
-      counts[op.country] = (counts[op.country] || 0) + 1;
+      const country = op.country || 'Unknown';
+      counts[country] = (counts[country] || 0) + 1;
     });
-    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+    return Object.entries(counts).map(([name, value]) => ({ name: String(name), value: Number(value) || 0 })).sort((a, b) => b.value - a.value);
   }, [operators]);
 
   const fleetByCategory = useMemo(() => {
     const counts: Record<string, number> = {};
     dbAircraft.forEach(ac => {
-      counts[ac.aircraft_family] = (counts[ac.aircraft_family] || 0) + ac.quantity;
+      const family = ac.aircraft_family || 'Unknown';
+      const qty = parseInt(ac.quantity) || 1;
+      counts[family] = (counts[family] || 0) + qty;
     });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+    return Object.entries(counts).map(([name, value]) => ({ name: String(name), value: Number(value) || 0 }));
   }, [dbAircraft]);
 
   const statusDistribution = useMemo(() => {
     const counts: Record<string, number> = {};
     operators.forEach(op => {
-      counts[op.status] = (counts[op.status] || 0) + 1;
+      const status = op.status || 'Unknown';
+      counts[status] = (counts[status] || 0) + 1;
     });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+    return Object.entries(counts).map(([name, value]) => ({ name: String(name), value: Number(value) || 0 }));
   }, [operators]);
 
   const topAircraftTypes = useMemo(() => {
     const counts: Record<string, number> = {};
     dbAircraft.forEach(ac => {
-      counts[ac.aircraft_type] = (counts[ac.aircraft_type] || 0) + ac.quantity;
+      const type = ac.aircraft_type || 'Unknown';
+      const qty = parseInt(ac.quantity) || 1;
+      counts[type] = (counts[type] || 0) + qty;
     });
-    return Object.entries(counts).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8);
+    return Object.entries(counts).map(([name, value]) => ({ name: String(name), value: Number(value) || 0 })).sort((a, b) => b.value - a.value).slice(0, 8);
   }, [dbAircraft]);
 
   const [isBulkEnriching, setIsBulkEnriching] = useState(false);

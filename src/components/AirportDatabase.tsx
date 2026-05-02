@@ -3,7 +3,7 @@ import { Search, MapPin, Wind, Fuel, UserCheck, ParkingCircle, Loader2, Globe, D
 import { searchAirports, searchHandlingAgents, getAirportDetails, searchNearbyAirports, searchAirportsByCountry } from '../services/aiService';
 import { getLiveWeather, getLiveNotams, MetarData, NotamData } from '../services/weatherService';
 import { db } from '../firebase';
-import { collection, addDoc, query, where, getDocs, limit, doc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, limit, doc, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../utils/errorHandling';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -18,6 +18,8 @@ export default function AirportDatabase() {
   const [recentAirports, setRecentAirports] = useState<any[]>([]);
   const [selectedAirport, setSelectedAirport] = useState<any | null>(null);
   const [handlingAgents, setHandlingAgents] = useState<any[]>([]);
+  const [agentsLastUpdated, setAgentsLastUpdated] = useState<string | undefined>(undefined);
+  const [isAgentsFromCache, setIsAgentsFromCache] = useState(false);
   const [fetchingAgents, setFetchingAgents] = useState(false);
   const [updatingDetails, setUpdatingDetails] = useState(false);
   const [liveWeather, setLiveWeather] = useState<MetarData | null>(null);
@@ -28,6 +30,112 @@ export default function AirportDatabase() {
   const [nearbyLng, setNearbyLng] = useState('');
   const [nearbyRadius, setNearbyRadius] = useState('50');
   const [isNearbySearch, setIsNearbySearch] = useState(false);
+  const [detectingLocation, setDetectingLocation] = useState(false);
+  const [internalNotes, setInternalNotes] = useState('');
+  const [isSavingMetadata, setIsSavingMetadata] = useState(false);
+
+  const handleNearMeSearch = async () => {
+    setDetectingLocation(true);
+    setLoading(true);
+    setIsNearbySearch(true);
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { 
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        });
+      });
+      
+      const loc = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude
+      };
+      
+      setNearbyLat(loc.lat.toFixed(4));
+      setNearbyLng(loc.lng.toFixed(4));
+
+      // Utilize searchAirports function as requested
+      const queryStr = `operational airports within ${nearbyRadius} nautical miles`;
+      const aiResults = await searchAirports(queryStr, loc);
+      setResults(aiResults.airports || []);
+      
+    } catch (error) {
+      console.error('Geolocation or Search Error:', error);
+      // Fallback or error message could be added here
+    } finally {
+      setDetectingLocation(false);
+      setLoading(false);
+    }
+  };
+
+  const handleGetLocation = () => {
+    setDetectingLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setNearbyLat(position.coords.latitude.toFixed(4));
+        setNearbyLng(position.coords.longitude.toFixed(4));
+        setDetectingLocation(false);
+      },
+      (error) => {
+        console.error('Error getting location:', error);
+        setDetectingLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+    );
+  };
+
+  const handleTogglePreferred = async (agent: any) => {
+    setFetchingAgents(true);
+    try {
+      // 1. Identify which agent we are toggling
+      const isCurrentlyPreferred = !!agent.preferred;
+      const targetIcao = selectedAirport.icao.toUpperCase();
+
+      // 2. Fetch all individual agent docs for this ICAO to unset others if naming a new preferred
+      const agentsRef = collection(db, 'handling_agents');
+      const q = query(agentsRef, where('icao', '==', targetIcao));
+      const snapshot = await getDocs(q);
+
+      // 3. For any doc that is NOT the cache doc, if it was preferred, unset it
+      const batch: Promise<any>[] = [];
+      snapshot.docs.forEach(d => {
+        const data = d.data();
+        if (!d.id.startsWith('cache_') && data.preferred && d.id !== agent.id) {
+          batch.push(updateDoc(doc(db, 'handling_agents', d.id), { preferred: false }));
+        }
+      });
+
+      // 4. Handle the target agent
+      if (agent.id && !agent.id.startsWith('cache_')) {
+        // It's an individual doc, just update it
+        batch.push(updateDoc(doc(db, 'handling_agents', agent.id), { 
+          preferred: !isCurrentlyPreferred,
+          updatedAt: new Date().toISOString()
+        }));
+      } else {
+        // It's from cache array, create an individual doc for it
+        if (!isCurrentlyPreferred) {
+          batch.push(addDoc(collection(db, 'handling_agents'), {
+            ...agent,
+            icao: targetIcao,
+            preferred: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }));
+        }
+      }
+
+      await Promise.all(batch);
+      
+      // Refresh list to show change
+      await fetchHandlingAgents(selectedAirport.icao, selectedAirport.name, selectedAirport.city);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'handling_agents');
+    } finally {
+      setFetchingAgents(false);
+    }
+  };
 
   const seedData = async () => {
     setLoading(true);
@@ -177,56 +285,80 @@ export default function AirportDatabase() {
     fetchRecent();
   }, []);
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
+  const performAirportSearch = async (queryStr: string) => {
+    if (!queryStr.trim()) return;
     
+    setSearchQuery(queryStr);
     setLoading(true);
+    setIsNearbySearch(false);
+    
     try {
-      // First check Firestore - check both ICAO and IATA
-      const qIcao = query(
-        collection(db, 'airports'), 
-        where('icao', '==', searchQuery.toUpperCase()),
-        limit(1)
-      );
-      const qIata = query(
-        collection(db, 'airports'), 
-        where('iata', '==', searchQuery.toUpperCase()),
-        limit(1)
-      );
+      // 1. Detect if it's a "near me" or specific location-based query
+      let userLocation: { lat: number, lng: number } | undefined = undefined;
+      const lowerQuery = queryStr.toLowerCase();
       
-      const [snapshotIcao, snapshotIata] = await Promise.all([
-        getDocs(qIcao),
-        getDocs(qIata)
-      ]);
-      
-      if (!snapshotIcao.empty || !snapshotIata.empty) {
-        const snapshot = !snapshotIcao.empty ? snapshotIcao : snapshotIata;
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setResults(Array.from(new Map(data.map(item => [item.id, item])).values()));
-      } else {
-        // If not in Firestore, search via AI
-        const aiResults = await searchAirports(searchQuery);
-        setResults(aiResults.airports);
-        
-        // Optionally cache first result in Firestore
-        if (aiResults.airports.length > 0) {
-          const airport = aiResults.airports[0];
-          try {
-            await addDoc(collection(db, 'airports'), {
-              ...airport,
-              createdAt: new Date().toISOString()
-            });
-          } catch (e) {
-            console.error("Error caching airport:", e);
-          }
+      if (lowerQuery.includes('near me') || lowerQuery.includes('nearby')) {
+        try {
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+          });
+          userLocation = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+          console.log('Using user location for search:', userLocation);
+        } catch (geoError) {
+          console.warn('Geolocation failed or timed out:', geoError);
+          // Continue without location, AI will try to guess or search generally
         }
       }
+
+      // 2. Decide strategy: Simple ICAO/IATA search OR AI-first natural language search
+      const isSimpleCode = /^[A-Z]{3,4}$/.test(queryStr.toUpperCase().trim());
+      
+      if (isSimpleCode) {
+        // Try Firestore first for simple codes
+        const qIcao = query(
+          collection(db, 'airports'), 
+          where('icao', '==', queryStr.toUpperCase()),
+          limit(1)
+        );
+        const qIata = query(
+          collection(db, 'airports'), 
+          where('iata', '==', queryStr.toUpperCase()),
+          limit(1)
+        );
+        
+        const [snapshotIcao, snapshotIata] = await Promise.all([
+          getDocs(qIcao),
+          getDocs(qIata)
+        ]);
+        
+        if (!snapshotIcao.empty || !snapshotIata.empty) {
+          const snapshot = !snapshotIcao.empty ? snapshotIcao : snapshotIata;
+          const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setResults(Array.from(new Map(data.map(item => [item.id, item])).values()));
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 3. Natural Language Search via AI (or no result in Firestore)
+      const aiResults = await searchAirports(queryStr, userLocation);
+      setResults(aiResults.airports);
+      
+      // Auto-scroll to results
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error) {
       console.error('Search error:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    performAirportSearch(searchQuery);
   };
 
   const handleNearbySearch = async (e: React.FormEvent) => {
@@ -245,12 +377,16 @@ export default function AirportDatabase() {
     }
   };
 
-  const fetchHandlingAgents = async (icao: string, name?: string, city?: string) => {
+  const fetchHandlingAgents = async (icao: string, name?: string, city?: string, force: boolean = false) => {
     setFetchingAgents(true);
-    setHandlingAgents([]);
+    if (force) setHandlingAgents([]);
+    setAgentsLastUpdated(undefined);
+    setIsAgentsFromCache(false);
     try {
-      const result = await searchHandlingAgents(icao, name, city);
+      const result = await searchHandlingAgents(icao, name, city, undefined, force);
       setHandlingAgents(result.agents || []);
+      setAgentsLastUpdated(result.lastUpdated);
+      setIsAgentsFromCache(!!result.isFromCache);
     } catch (error) {
       console.error('Error fetching handling agents:', error);
     } finally {
@@ -276,14 +412,81 @@ export default function AirportDatabase() {
 
   useEffect(() => {
     if (selectedAirport) {
+      setInternalNotes(selectedAirport.internalNotes || '');
       fetchWeatherData(selectedAirport.icao);
       fetchHandlingAgents(selectedAirport.icao, selectedAirport.name, selectedAirport.city);
+      
+      // Auto-enrich technical details if important fields are missing
+      if (!selectedAirport.runwayLength || !selectedAirport.elevation) {
+        updateAirportDetails(selectedAirport);
+      }
     } else {
+      setInternalNotes('');
       setLiveWeather(null);
       setLiveNotams(null);
       setHandlingAgents([]);
+      setAgentsLastUpdated(undefined);
+      setIsAgentsFromCache(false);
     }
-  }, [selectedAirport]);
+  }, [selectedAirport?.icao]);
+
+  const saveAirportMetadata = async (newRating?: number, newNotes?: string) => {
+    if (!selectedAirport) return;
+    
+    setIsSavingMetadata(true);
+    try {
+      let airportId = selectedAirport.id;
+      const ratingToSave = newRating !== undefined ? newRating : (selectedAirport.rating || selectedAirport.score || 0);
+      const notesToSave = newNotes !== undefined ? newNotes : internalNotes;
+
+      // If no ID, it means it's an AI result not yet in our DB, so we create it
+      if (!airportId) {
+        const airportsRef = collection(db, 'airports');
+        const q = query(airportsRef, where('icao', '==', selectedAirport.icao));
+        const snapshot = await getDocs(q);
+        
+        if (!snapshot.empty) {
+          airportId = snapshot.docs[0].id;
+        } else {
+          const docRef = await addDoc(airportsRef, {
+            ...selectedAirport,
+            rating: ratingToSave,
+            internalNotes: notesToSave,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+          airportId = docRef.id;
+        }
+      }
+
+      const airportRef = doc(db, 'airports', airportId);
+      await setDoc(airportRef, {
+        rating: ratingToSave,
+        internalNotes: notesToSave,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      const updatedAirport = { 
+        ...selectedAirport, 
+        id: airportId, 
+        rating: ratingToSave, 
+        score: ratingToSave, // Keep score in sync for compatibility
+        internalNotes: notesToSave 
+      };
+      
+      setSelectedAirport(updatedAirport);
+      setResults(prev => prev.map(a => a.icao === selectedAirport.icao ? updatedAirport : a));
+      setRecentAirports(prev => {
+        const filtered = prev.filter(a => a.icao !== selectedAirport.icao);
+        return [updatedAirport, ...filtered].slice(0, 10);
+      });
+      
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'airports');
+    } finally {
+      setIsSavingMetadata(false);
+    }
+  };
 
   const updateAirportDetails = async (airport: any) => {
     if (!airport.icao) return;
@@ -309,24 +512,12 @@ export default function AirportDatabase() {
       // Update results list
       setResults(prev => prev.map(a => (a.icao === airport.icao ? newAirport : a)));
       setRecentAirports(prev => prev.map(a => (a.icao === airport.icao ? newAirport : a)));
-
-      alert(`Successfully updated details for ${airport.icao}`);
     } catch (error) {
       console.error('Error updating airport details:', error);
-      alert('Failed to update airport details via AI.');
+      // Only alert on manual update failure if we ever distinguish them, 
+      // but for now, just logging to console is cleaner for auto-enrichment.
     } finally {
       setUpdatingDetails(false);
-    }
-  };
-
-  const updateAirportScore = async (newScore: number) => {
-    if (!selectedAirport.id) return;
-    try {
-      const airportRef = doc(db, 'airports', selectedAirport.id);
-      await updateDoc(airportRef, { score: newScore });
-      setSelectedAirport({ ...selectedAirport, score: newScore });
-    } catch (error) {
-      console.error('Error updating score:', error);
     }
   };
 
@@ -372,39 +563,63 @@ export default function AirportDatabase() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            <Globe className="text-indigo-600 dark:text-indigo-400" size={20} />
-            <h2 className="font-bold text-gray-800 dark:text-white">Global Airport Database</h2>
-          </div>
-          <button
-            onClick={seedData}
-            disabled={loading}
-            className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-4 py-1.5 rounded-xl font-bold flex items-center gap-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition border border-indigo-100 dark:border-indigo-800 text-xs"
-          >
-            <Sparkles size={14} />
-            Seed Airports
-          </button>
+      {/* AI Search Section */}
+      <div className="bg-gradient-to-br from-indigo-600 to-violet-700 p-8 rounded-3xl shadow-xl shadow-indigo-200 dark:shadow-none mb-12 relative overflow-hidden group">
+        <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform">
+          <Sparkles size={120} className="text-white" />
         </div>
+        
+        <div className="relative z-10">
+          <h2 className="text-2xl font-black text-white mb-2 uppercase tracking-tight flex items-center gap-3">
+            <Globe size={24} className="animate-pulse" />
+            AI Airport Intelligence
+          </h2>
+          <div className="flex justify-between items-center mb-8">
+            <p className="text-indigo-100 text-sm max-w-md font-medium">Search using natural language: "Airports in London with Jet A1", "Helipads near NYC", or "Longest runway in France".</p>
+            <button
+              onClick={seedData}
+              disabled={loading}
+              className="bg-white/10 hover:bg-white/20 text-white px-4 py-1.5 rounded-xl font-bold flex items-center gap-2 transition border border-white/20 text-xs backdrop-blur-sm disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+              Reset DB
+            </button>
+          </div>
+          
+          <form onSubmit={handleSearch} className="relative max-w-3xl">
+            <input
+              type="text"
+              placeholder="Query airports, cities, or technical requirements..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-white/20 backdrop-blur-xl border border-white/30 rounded-2xl py-5 pl-12 pr-36 text-white placeholder:text-indigo-200 outline-none focus:ring-4 focus:ring-white/20 transition-all font-medium text-lg lg:text-xl shadow-2xl"
+            />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-100" size={24} />
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
+              <button
+                type="submit"
+                disabled={loading}
+                className="bg-white text-indigo-600 px-8 py-3 rounded-xl font-black text-sm uppercase tracking-widest hover:bg-indigo-50 transition-all flex items-center gap-2 shadow-xl outline-none active:scale-95 disabled:opacity-75"
+              >
+                {loading ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
+                Search
+              </button>
+            </div>
+          </form>
 
-        <form onSubmit={handleSearch} className="relative">
-          <Search className="absolute left-3 top-3 text-gray-400 dark:text-gray-500" size={20} />
-          <input 
-            type="text" 
-            placeholder="Search by IATA, ICAO, or City..." 
-            className="w-full pl-10 p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition dark:text-white"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-          <button 
-            type="submit"
-            disabled={loading}
-            className="absolute right-2 top-2 bg-indigo-600 text-white px-4 py-1.5 rounded-lg hover:bg-indigo-700 transition disabled:opacity-50"
-          >
-            {loading ? <Loader2 className="animate-spin" size={18} /> : 'Search'}
-          </button>
-        </form>
+          <div className="mt-6 flex flex-wrap gap-2">
+            <span className="text-xs text-indigo-200 font-bold uppercase tracking-widest mr-2 py-1 flex items-center">Example Queries:</span>
+            {['airports near me', 'airports in London with Jet A1', 'Runways > 10000ft in UAE'].map((hint) => (
+              <button
+                key={hint}
+                onClick={() => performAirportSearch(hint)}
+                className="text-[10px] bg-white/10 hover:bg-white/20 text-white px-4 py-1.5 rounded-full border border-white/10 transition-all font-bold backdrop-blur-sm"
+              >
+                {hint}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
@@ -437,14 +652,34 @@ export default function AirportDatabase() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <h4 className="font-bold text-xs text-gray-500 dark:text-gray-400 uppercase mb-2">International Airports</h4>
-                  <ul className="text-xs space-y-1">
-                    {countryResults.internationalAirports.map((a: any) => <li key={a.icao}>{a.name} ({a.icao})</li>)}
+                  <ul className="text-xs space-y-2">
+                    {countryResults.internationalAirports.map((a: any, idx: number) => (
+                      <li key={`intl-${a.icao || idx}`}>
+                        <button 
+                          onClick={() => performAirportSearch(a.icao)}
+                          className="text-left w-full hover:text-indigo-600 dark:hover:text-indigo-400 transition flex items-center justify-between group"
+                        >
+                          <span>{a.name} <span className="text-gray-400 font-mono text-[10px] ml-1">({a.icao})</span></span>
+                          <span className="opacity-0 group-hover:opacity-100 text-[10px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-500 px-2 py-0.5 rounded">View</span>
+                        </button>
+                      </li>
+                    ))}
                   </ul>
                 </div>
                 <div>
                   <h4 className="font-bold text-xs text-gray-500 dark:text-gray-400 uppercase mb-2">Domestic Airports</h4>
-                  <ul className="text-xs space-y-1">
-                    {countryResults.domesticAirports.map((a: any) => <li key={a.icao}>{a.name} ({a.icao})</li>)}
+                  <ul className="text-xs space-y-2">
+                    {countryResults.domesticAirports.map((a: any, idx: number) => (
+                      <li key={`dom-${a.icao || idx}`}>
+                        <button 
+                          onClick={() => performAirportSearch(a.icao)}
+                          className="text-left w-full hover:text-indigo-600 dark:hover:text-indigo-400 transition flex items-center justify-between group"
+                        >
+                          <span>{a.name} <span className="text-gray-400 font-mono text-[10px] ml-1">({a.icao})</span></span>
+                          <span className="opacity-0 group-hover:opacity-100 text-[10px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-500 px-2 py-0.5 rounded">View</span>
+                        </button>
+                      </li>
+                    ))}
                   </ul>
                 </div>
               </div>
@@ -453,13 +688,23 @@ export default function AirportDatabase() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
-        <div className="flex items-center gap-2 mb-6">
-          <Navigation className="text-indigo-600 dark:text-indigo-400" size={20} />
-          <h2 className="font-bold text-gray-800 dark:text-white">Nearby Airport Search (PostGIS)</h2>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <Navigation className="text-indigo-600 dark:text-indigo-400" size={20} />
+            <h2 className="font-bold text-gray-800 dark:text-white">Nearby Airport Search (PostGIS & AI)</h2>
+          </div>
+          <button
+            onClick={handleNearMeSearch}
+            disabled={loading || detectingLocation}
+            className="flex items-center gap-2 text-xs font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-4 py-2 rounded-xl border border-indigo-100 dark:border-indigo-800 hover:bg-indigo-100 transition disabled:opacity-50"
+          >
+            {detectingLocation ? <Loader2 className="animate-spin" size={14} /> : <MapPin size={14} />}
+            Find Near Me (AI)
+          </button>
         </div>
 
         <form onSubmit={handleNearbySearch} className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div>
+          <div className="relative">
             <label className="block text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Latitude</label>
             <input 
               type="number" 
@@ -470,6 +715,14 @@ export default function AirportDatabase() {
               onChange={(e) => setNearbyLat(e.target.value)}
               required
             />
+            <button
+              type="button"
+              onClick={handleGetLocation}
+              className="absolute right-2 top-6 p-1 text-indigo-500 hover:text-indigo-700 transition"
+              title="Get current location"
+            >
+              <Navigation size={14} className={detectingLocation ? 'animate-pulse' : ''} />
+            </button>
           </div>
           <div>
             <label className="block text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Longitude</label>
@@ -542,6 +795,12 @@ export default function AirportDatabase() {
                     <span>ATIS: <span className="text-gray-900 dark:text-white">{airport.atisFrequency}</span></span>
                   </div>
                 )}
+                {(airport.towerFrequency || airport.groundFrequency) && (
+                  <div className="flex items-center gap-2 text-gray-500 font-medium text-[10px]">
+                    {airport.towerFrequency && <span>TWR: {airport.towerFrequency}</span>}
+                    {airport.groundFrequency && <span>GND: {airport.groundFrequency}</span>}
+                  </div>
+                )}
               </div>
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
@@ -599,11 +858,16 @@ export default function AirportDatabase() {
                 <h2 className="text-2xl font-black text-gray-900 dark:text-white">{selectedAirport.name}</h2>
                 <div className="flex items-center gap-1">
                   {[1, 2, 3, 4, 5].map((star) => (
-                    <button key={star} onClick={() => updateAirportScore(star)} className="focus:outline-none">
-                      <Star size={20} className={star <= (selectedAirport.score || 0) ? 'text-yellow-400 fill-current' : 'text-gray-300'} />
+                    <button 
+                      key={star} 
+                      onClick={() => saveAirportMetadata(star)} 
+                      disabled={isSavingMetadata}
+                      className="focus:outline-none disabled:opacity-50"
+                    >
+                      <Star size={20} className={star <= (selectedAirport.rating || selectedAirport.score || 0) ? 'text-yellow-400 fill-current' : 'text-gray-300'} />
                     </button>
                   ))}
-                  <span className="ml-2 text-xs font-bold text-gray-500">({selectedAirport.score || 0}/5)</span>
+                  <span className="ml-2 text-xs font-bold text-gray-500">({selectedAirport.rating || selectedAirport.score || 0}/5)</span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -640,7 +904,37 @@ export default function AirportDatabase() {
                 <p className="text-sm text-gray-500 dark:text-gray-400">Runway: <span className="font-bold text-gray-900 dark:text-white">{selectedAirport.runwayLength?.toLocaleString()} ft</span></p>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Elevation: <span className="font-bold text-gray-900 dark:text-white">{selectedAirport.elevation?.toLocaleString()} ft</span></p>
                 <p className="text-sm text-gray-500 dark:text-gray-400">ATIS Frequency: <span className="font-bold text-indigo-600 dark:text-indigo-400">{selectedAirport.atisFrequency || 'N/A'}</span></p>
+                {selectedAirport.towerFrequency && <p className="text-sm text-gray-500 dark:text-gray-400">Tower: <span className="font-bold text-gray-900 dark:text-white">{selectedAirport.towerFrequency}</span></p>}
+                {selectedAirport.groundFrequency && <p className="text-sm text-gray-500 dark:text-gray-400">Ground: <span className="font-bold text-gray-900 dark:text-white">{selectedAirport.groundFrequency}</span></p>}
+                <p className="text-sm text-gray-500 dark:text-gray-400">Fuel: <span className="font-bold text-gray-900 dark:text-white">{(selectedAirport.fuelTypes || selectedAirport.fuelAvailability || []).join(', ') || 'N/A'}</span></p>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Parking: <span className="font-bold text-gray-900 dark:text-white">{selectedAirport.parkingSpots} spots</span></p>
+              </div>
+            </div>
+
+            <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700">
+              <div className="flex items-center gap-2 mb-4">
+                <Star size={18} className="text-indigo-600 dark:text-indigo-400" />
+                <h3 className="font-bold text-gray-800 dark:text-white uppercase tracking-wider text-sm">Internal Intelligence & Notes</h3>
+              </div>
+              <div className="space-y-4">
+                <div className="relative">
+                  <textarea
+                    value={internalNotes}
+                    onChange={(e) => setInternalNotes(e.target.value)}
+                    placeholder="Enter internal operational notes, ground handling experiences, or specific airport requirements..."
+                    className="w-full h-32 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white transition-all placeholder:text-gray-400"
+                  />
+                  <div className="absolute bottom-3 right-3">
+                    <button
+                      onClick={() => saveAirportMetadata(undefined, internalNotes)}
+                      disabled={isSavingMetadata || internalNotes === (selectedAirport.internalNotes || '')}
+                      className="bg-indigo-600 text-white px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-700 transition-all disabled:opacity-50 flex items-center gap-2 shadow-lg"
+                    >
+                      {isSavingMetadata ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                      {isSavingMetadata ? 'Saving...' : 'Save Notes'}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -718,60 +1012,113 @@ export default function AirportDatabase() {
 
             <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                  <Building2 size={18} className="text-indigo-600 dark:text-indigo-400" />
-                  Handling Agents
-                </h3>
+                <div>
+                  <h3 className="font-black text-gray-900 dark:text-white flex items-center gap-2 text-sm uppercase tracking-wider">
+                    <Building2 size={18} className="text-indigo-600 dark:text-indigo-400" />
+                    Ground Handling Agents
+                  </h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <p className="text-[10px] text-gray-400 font-medium">Verified local FBOs and handlers</p>
+                    {agentsLastUpdated && (
+                      <>
+                        <span className="text-gray-300 dark:text-gray-600 px-1">•</span>
+                        <span className={`text-[9px] font-bold uppercase tracking-tight ${isAgentsFromCache ? 'text-amber-500' : 'text-emerald-500'}`}>
+                          {isAgentsFromCache ? 'From Database' : 'Live Search'}
+                        </span>
+                        <span className="text-[9px] text-gray-400 font-medium">
+                          ({new Date(agentsLastUpdated).toLocaleDateString()} {new Date(agentsLastUpdated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
                 <button
-                  onClick={() => fetchHandlingAgents(selectedAirport.icao, selectedAirport.name, selectedAirport.city)}
+                  onClick={() => fetchHandlingAgents(selectedAirport.icao, selectedAirport.name, selectedAirport.city, true)}
                   disabled={fetchingAgents}
-                  className="text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1 hover:underline disabled:opacity-50"
+                  className="bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-3 py-1.5 rounded-xl font-bold text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition border border-indigo-100 dark:border-indigo-800 disabled:opacity-50 shadow-sm"
                 >
-                  {fetchingAgents ? <Loader2 className="animate-spin" size={12} /> : <Sparkles size={12} />}
-                  {handlingAgents.length > 0 ? 'Refresh AI Suggestions' : 'Find Agents via AI'}
+                  {fetchingAgents ? <Loader2 className="animate-spin text-indigo-600" size={12} /> : <Sparkles size={12} />}
+                  {handlingAgents.length > 0 ? 'Refresh Agents' : 'Find Agents'}
                 </button>
               </div>
 
               {fetchingAgents && (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="animate-spin text-indigo-600" size={24} />
+                <div className="flex flex-col items-center justify-center py-12 bg-gray-50/50 dark:bg-gray-900/30 rounded-3xl border border-dashed border-gray-200 dark:border-gray-800">
+                  <Loader2 className="animate-spin text-indigo-600 mb-2" size={32} />
+                  <p className="text-xs font-bold text-gray-500 animate-pulse uppercase tracking-widest">Searching local station contacts...</p>
                 </div>
               )}
 
               {!fetchingAgents && handlingAgents.length > 0 && (
-                <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                   {handlingAgents.map((agent, idx) => (
-                    <div key={idx} className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border border-gray-100 dark:border-gray-700">
-                      <div className="flex justify-between items-start mb-2">
-                        <h4 className="font-bold text-sm text-gray-900 dark:text-white">{agent.companyName}</h4>
-                        <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">
-                          ${agent.baseFee} Base
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-[10px]">
-                        <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
-                          <Mail size={12} />
-                          <span className="truncate">{agent.email}</span>
-                        </div>
-                        {agent.phone && (
-                          <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
-                            <Phone size={12} />
-                            <a href={`tel:${agent.phone}`} className="hover:text-indigo-600 dark:hover:text-indigo-400 transition">{agent.phone}</a>
+                    <div key={idx} className="group p-4 bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 hover:border-indigo-200 dark:hover:border-indigo-600 transition-all hover:shadow-md">
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleTogglePreferred(agent); }}
+                            className={`mt-0.5 transition-colors ${agent.preferred ? 'text-amber-500' : 'text-gray-300 hover:text-amber-400'}`}
+                            title={agent.preferred ? "Remove from preferred" : "Mark as preferred"}
+                          >
+                            <Star size={16} fill={agent.preferred ? "currentColor" : "none"} />
+                          </button>
+                          <div>
+                            <h4 className="font-black text-sm text-gray-900 dark:text-white uppercase leading-none mb-1 flex items-center gap-2">
+                              {agent.companyName}
+                              {agent.preferred && (
+                                <span className="bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[7px] px-1.5 py-0.5 rounded-full font-black tracking-widest uppercase">Preferred</span>
+                              )}
+                            </h4>
+                            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">Verified Local Handler</span>
                           </div>
+                        </div>
+                        <div className="flex flex-col items-end">
+                          <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">
+                            ${agent.baseFee?.toLocaleString()}
+                          </span>
+                          <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">Base Fee</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-3 mb-3">
+                        {agent.email && (
+                          <a 
+                            href={`mailto:${agent.email}`}
+                            className="flex items-center gap-1.5 text-[10px] text-gray-500 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400 transition font-medium"
+                          >
+                            <Mail size={12} className="text-indigo-400" />
+                            <span className="truncate max-w-[120px]">{agent.email}</span>
+                          </a>
+                        )}
+                        {agent.phone && (
+                          <a 
+                            href={`tel:${agent.phone}`}
+                            className="flex items-center gap-1.5 text-[10px] text-gray-500 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400 transition font-medium"
+                          >
+                            <Phone size={12} className="text-indigo-400" />
+                            <span>{agent.phone}</span>
+                          </a>
                         )}
                         {agent.website && (
-                          <div className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400 col-span-2">
-                            <Globe size={12} className="shrink-0" />
-                            <a href={agent.website} target="_blank" rel="noopener noreferrer" className="hover:text-indigo-600 dark:hover:text-indigo-400 truncate flex items-center gap-1 transition">
-                              {agent.website.replace(/^https?:\/\//, '')} <ExternalLink size={8} className="shrink-0" />
-                            </a>
-                          </div>
+                          <a 
+                            href={agent.website} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="flex items-center gap-1.5 text-[10px] text-gray-500 hover:text-indigo-600 dark:text-gray-400 dark:hover:text-indigo-400 transition font-medium"
+                          >
+                            <Globe size={12} className="text-indigo-400" />
+                            <span className="truncate max-w-[120px]">{agent.website.replace(/^https?:\/\//, '')}</span>
+                            <ExternalLink size={8} />
+                          </a>
                         )}
                       </div>
+
                       {agent.additionalServices && (
-                        <p className="mt-2 text-[10px] text-gray-400 dark:text-gray-500 italic line-clamp-1">
-                          "{agent.additionalServices}"
-                        </p>
+                        <div className="p-2 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                          <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-relaxed italic">
+                             "{agent.additionalServices}"
+                          </p>
+                        </div>
                       )}
                     </div>
                   ))}
@@ -779,9 +1126,17 @@ export default function AirportDatabase() {
               )}
 
               {!fetchingAgents && handlingAgents.length === 0 && (
-                <p className="text-center py-8 text-xs text-gray-400 dark:text-gray-500 italic">
-                  Click the button above to discover handling agents at this airport using AI.
-                </p>
+                <div className="text-center py-10 bg-gray-50/50 dark:bg-gray-900/30 rounded-3xl border border-dashed border-gray-200 dark:border-gray-800">
+                  <Building2 className="mx-auto text-gray-300 dark:text-gray-600 mb-3 opacity-50" size={32} />
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">No local handlers discovered yet</p>
+                  <button
+                    onClick={() => fetchHandlingAgents(selectedAirport.icao, selectedAirport.name, selectedAirport.city, true)}
+                    className="mx-auto bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 px-6 py-2.5 rounded-full font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-gray-700 transition border border-gray-100 dark:border-gray-700 shadow-sm"
+                  >
+                    <Sparkles size={12} />
+                    Auto-Discover with AI
+                  </button>
+                </div>
               )}
             </div>
 

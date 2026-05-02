@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Calculator, Plane, MapPin, DollarSign, Fuel, Users, Zap, Search, Globe, AlertCircle, Loader2, ChevronRight, TrendingUp, PieChart as PieChartIcon, BarChart3, Sparkles, Target } from 'lucide-react';
+import { safeStringify } from '../utils/safeJson';
+import { Calculator, Plane, MapPin, DollarSign, Fuel, Users, Zap, Search, Globe, AlertCircle, Loader2, ChevronRight, ChevronDown, TrendingUp, PieChart as PieChartIcon, BarChart3, Sparkles, Target, Info } from 'lucide-react';
 import { calculateACMIQuote } from '../services/aiService';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -22,11 +23,14 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
   const [brokerMargin, setBrokerMargin] = useState(12);
   const [riskLevel, setRiskLevel] = useState('Normal');
   const [budget, setBudget] = useState<number | ''>('');
+  const [passengers, setPassengers] = useState(0);
+  const [isVip, setIsVip] = useState(false);
   
   const [loading, setLoading] = useState(false);
   const [quote, setQuote] = useState<any>(null);
   const [operators, setOperators] = useState<any[]>([]);
   const [searchingOperators, setSearchingOperators] = useState(false);
+  const [showDetailedNote, setShowDetailedNote] = useState(false);
 
   const aircraftOptions = [
     { type: 'A320', rate: '$4,500 – $6,500', burn: '2,500 kg', speed: '450 kt' },
@@ -43,7 +47,7 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
       const response = await fetch('/api/acmi/calculate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: safeStringify({
           departure,
           destination,
           aircraftType,
@@ -51,6 +55,8 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
           brokerMargin: brokerMargin / 100,
           riskLevel,
           totalBudget: budget || undefined,
+          passengers,
+          isVip,
           multipliers: {
             seasonality: seasonMultiplier,
             urgency: urgencyMultiplier,
@@ -67,8 +73,14 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
       
       // Also search for operators
       searchOperators(aircraftType);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error calculating ACMI quote:', error);
+      const isQuota = error?.message?.toLowerCase().includes('quota') || error?.message?.includes('429');
+      
+      if (isQuota) {
+        alert('The AI Pricing Engine is currently at capacity. We have generated a standard estimate based on benchmark data. Detailed AI analysis will resume shortly.');
+      }
+
       // Fallback to local calculation if API fails
       const fallback = await calculateACMIQuote({
         departure,
@@ -202,6 +214,21 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
             </div>
           </div>
 
+          {/* Passengers */}
+          <div className="space-y-4">
+            <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">Passengers</label>
+            <div className="relative">
+              <Users className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+              <input
+                type="number"
+                value={passengers}
+                onChange={(e) => setPassengers(Number(e.target.value))}
+                className="w-full pl-9 pr-4 py-3 bg-gray-50 dark:bg-gray-900 border-none rounded-xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 transition-all"
+                placeholder="Optional"
+              />
+            </div>
+          </div>
+
           {/* Client Budget */}
           <div className="space-y-4">
             <label className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Client Budget (Target)</label>
@@ -214,6 +241,22 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
                 className="w-full pl-9 pr-4 py-3 bg-emerald-50/50 dark:bg-emerald-900/10 border-none rounded-xl text-sm font-bold text-emerald-700 dark:text-emerald-400 focus:ring-2 focus:ring-emerald-500 transition-all"
                 placeholder="Optional"
               />
+            </div>
+          </div>
+
+          {/* Service Level */}
+          <div className="space-y-4">
+            <label className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Service Level</label>
+            <div 
+              onClick={() => setIsVip(!isVip)}
+              className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border ${isVip ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-gray-50 dark:bg-gray-900 text-gray-500 border-gray-100 dark:border-gray-800'}`}
+            >
+              <div className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${isVip ? 'bg-white text-indigo-600' : 'bg-gray-200 text-gray-400'}`}>
+                <Sparkles size={12} />
+              </div>
+              <div>
+                <p className="text-[10px] font-black uppercase leading-tight">{isVip ? 'VIP / Luxury' : 'Standard'}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -320,23 +363,39 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
           </div>
         </div>
 
-        <button
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
           onClick={handleCalculate}
           disabled={loading}
           className="w-full mt-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl shadow-indigo-200 dark:shadow-none transition-all flex items-center justify-center gap-2 disabled:opacity-50"
         >
-          {loading ? (
-            <>
-              <Loader2 className="animate-spin" size={18} />
-              Running Pricing Engine...
-            </>
-          ) : (
-            <>
-              <Zap size={18} />
-              Generate ACMI Quote
-            </>
-          )}
-        </button>
+          <AnimatePresence mode="wait">
+            {loading ? (
+              <motion.div 
+                key="loading"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="flex items-center gap-2"
+              >
+                <Loader2 className="animate-spin" size={18} />
+                Running Pricing Engine...
+              </motion.div>
+            ) : (
+              <motion.div 
+                key="idle"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="flex items-center gap-2"
+              >
+                <Zap size={18} />
+                Generate ACMI Quote
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.button>
       </div>
 
       <AnimatePresence>
@@ -355,8 +414,16 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
                 
                 <div className="flex items-center justify-between mb-8">
                   <h3 className="text-xl font-black text-gray-900 dark:text-white uppercase tracking-tight">Quotation Summary</h3>
-                  <div className="px-4 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-full text-[10px] font-black uppercase tracking-widest">
-                    AI Verified
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setShowDetailedNote(!showDetailedNote)}
+                      className="px-4 py-1.5 bg-gray-50 dark:bg-gray-900 text-gray-500 rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-indigo-50 hover:text-indigo-600 transition-all border border-gray-100 dark:border-gray-800"
+                    >
+                      {showDetailedNote ? 'Brief View' : 'Full Disclosure'}
+                    </button>
+                    <div className="px-4 py-1.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-full text-[10px] font-black uppercase tracking-widest">
+                      AI Verified
+                    </div>
                   </div>
                 </div>
 
@@ -372,6 +439,7 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
                               { name: 'Overflight', value: quote.breakdown.overflight },
                               { name: 'Airport', value: (quote.breakdown.landing || 0) + (quote.breakdown.handling || 0) },
                               { name: 'Crew', value: quote.breakdown.crew },
+                              ...(quote.breakdown.catering ? [{ name: 'Catering', value: quote.breakdown.catering }] : []),
                               { name: 'Margin', value: quote.breakdown.brokerMargin || 0 },
                             ]}
                             cx="50%"
@@ -387,6 +455,8 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
                               '#f59e0b', // Amber
                               '#ef4444', // Red
                               '#8b5cf6', // Violet
+                              '#ec4899', // Pink (for Catering if present, but since it's dynamic we need to make sure we have enough colors)
+                              '#3b82f6', // Blue
                             ].map((color, index) => (
                               <Cell key={`cell-${index}`} fill={color} />
                             ))}
@@ -418,6 +488,12 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
                       <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Distance</span>
                       <span className="text-lg font-black text-gray-900 dark:text-white">{Math.round(quote.metrics?.distance || quote.distanceNm).toLocaleString()} NM</span>
                     </div>
+                    {quote.breakdown?.catering > 0 && (
+                      <div className="flex items-center justify-between pb-4 border-b border-gray-50 dark:border-gray-700">
+                        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Catering (Pax/VIP)</span>
+                        <span className="text-lg font-black text-gray-900 dark:text-white">${quote.breakdown.catering.toLocaleString()}</span>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between pb-4 border-b border-gray-50 dark:border-gray-700">
                       <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Total Quote</span>
                       <span className="text-3xl font-black text-indigo-600">${quote.totalCost.toLocaleString()}</span>
@@ -432,94 +508,147 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
                   </div>
                 </div>
 
-                {quote.detailedBreakdown && (
-                  <div className="mt-8 p-6 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-3xl shadow-inner">
-                    <div className="flex items-center gap-2 mb-6">
-                      <Sparkles size={16} className="text-indigo-600" />
-                      <h4 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-tight">Detailed Operational Note</h4>
-                    </div>
-                    
-                    <div className="space-y-6">
-                      {/* Departure */}
-                      <div className="flex gap-4">
-                        <div className="shrink-0 w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center text-emerald-600 font-black text-xs">DEP</div>
-                        <div className="flex-1">
-                          <p className="text-xs font-black text-gray-900 dark:text-white">{quote.detailedBreakdown.departure.name} ({quote.detailedBreakdown.departure.icao}/{quote.detailedBreakdown.departure.iata})</p>
-                          <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Agent: {quote.detailedBreakdown.departure.handlingAgency}</p>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
-                             <div>
-                               <p className="text-[8px] font-black text-gray-400 uppercase">Navigational</p>
-                               <p className="text-xs font-bold">${quote.detailedBreakdown.departure.navigational.toLocaleString()}</p>
-                             </div>
-                             <div>
-                               <p className="text-[8px] font-black text-gray-400 uppercase">Terminal</p>
-                               <p className="text-xs font-bold">${quote.detailedBreakdown.departure.terminal.toLocaleString()}</p>
-                             </div>
-                             <div>
-                               <p className="text-[8px] font-black text-gray-400 uppercase">Parking</p>
-                               <p className="text-xs font-bold">${quote.detailedBreakdown.departure.parking.toLocaleString()}</p>
-                             </div>
-                             <div>
-                               <p className="text-[8px] font-black text-gray-400 uppercase">Fuel</p>
-                               <p className="text-xs font-bold">${quote.detailedBreakdown.departure.fuel.toLocaleString()}</p>
-                             </div>
-                          </div>
+                <AnimatePresence>
+                  {quote.detailedBreakdown && showDetailedNote && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="mt-8 overflow-hidden"
+                    >
+                      <div className="p-6 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-3xl shadow-inner">
+                        <div className="flex items-center gap-2 mb-6">
+                          <Sparkles size={16} className="text-indigo-600" />
+                          <h4 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-tight">Detailed Operational Note</h4>
                         </div>
-                      </div>
-
-                      {/* Route/FIRs */}
-                      <div className="flex gap-4">
-                        <div className="shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center text-indigo-600">
-                          <Globe size={14} />
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-xs font-black text-gray-900 dark:text-white">Route Distance: {quote.detailedBreakdown.route.totalDistanceNm.toLocaleString()} NM</p>
-                          <div className="flex flex-wrap gap-2 mt-2">
-                            {quote.detailedBreakdown.route.firs.map((fir: any, i: number) => (
-                              <div key={i} className="px-2 py-1 bg-gray-50 dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-700">
-                                <span className="text-[9px] font-bold text-gray-600 dark:text-gray-400">{fir.name} ({fir.code}): </span>
-                                <span className="text-[9px] font-black text-indigo-600">${fir.charge.toLocaleString()}</span>
+                        
+                        <div className="space-y-6">
+                          {/* Departure */}
+                          <div className="flex gap-4">
+                            <div className="shrink-0 w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg flex items-center justify-center text-emerald-600 font-black text-xs">DEP</div>
+                            <div className="flex-1">
+                              <p className="text-xs font-black text-gray-900 dark:text-white">
+                                {quote.detailedBreakdown.departure.name} ({quote.detailedBreakdown.departure.icao}/{quote.detailedBreakdown.departure.iata})
+                                <span className="ml-2 inline-flex items-center group relative cursor-help">
+                                  <Info size={10} className="text-gray-400" />
+                                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-32 p-2 bg-gray-900 text-[8px] text-white rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Origin node for flight dispatch.</span>
+                                </span>
+                              </p>
+                              <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Agent: {quote.detailedBreakdown.departure.handlingAgency}</ p>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                                 <div>
+                                   <p className="text-[8px] font-black text-gray-400 uppercase">Navigational</p>
+                                   <p className="text-xs font-bold">${quote.detailedBreakdown.departure.navigational.toLocaleString()}</p>
+                                 </div>
+                                 <div>
+                                   <p className="text-[8px] font-black text-gray-400 uppercase">Terminal</p>
+                                   <p className="text-xs font-bold">${quote.detailedBreakdown.departure.terminal.toLocaleString()}</p>
+                                 </div>
+                                 <div>
+                                   <p className="text-[8px] font-black text-gray-400 uppercase">Parking</p>
+                                   <p className="text-xs font-bold">${quote.detailedBreakdown.departure.parking.toLocaleString()}</p>
+                                 </div>
+                                 <div>
+                                   <p className="text-[8px] font-black text-gray-400 uppercase">Fuel</p>
+                                   <p className="text-xs font-bold">${quote.detailedBreakdown.departure.fuel.toLocaleString()}</p>
+                                 </div>
                               </div>
-                            ))}
+                            </div>
+                          </div>
+
+                          {/* Route/FIRs */}
+                          <div className="flex gap-4">
+                            <div className="shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg flex items-center justify-center text-indigo-600">
+                              <Globe size={14} />
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-xs font-black text-gray-900 dark:text-white">Route Distance: {quote.detailedBreakdown.route.totalDistanceNm.toLocaleString()} NM</p>
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                {quote.detailedBreakdown.route.firs.map((fir: any, i: number) => (
+                                  <motion.div 
+                                    key={i}
+                                    initial={{ opacity: 0, scale: 0.9 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    transition={{ delay: i * 0.05 }}
+                                    className="px-2 py-1 bg-gray-50 dark:bg-gray-800 rounded border border-gray-100 dark:border-gray-700"
+                                  >
+                                    <span className="text-[9px] font-bold text-gray-600 dark:text-gray-400">{fir.name} ({fir.code}): </span>
+                                    <span className="text-[9px] font-black text-indigo-600">${fir.charge.toLocaleString()}</span>
+                                  </motion.div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Arrival */}
+                          <div className="flex gap-4">
+                            <div className="shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center text-blue-600 font-black text-xs">ARR</div>
+                            <div className="flex-1">
+                              <p className="text-xs font-black text-gray-900 dark:text-white">
+                                {quote.detailedBreakdown.arrival.name} ({quote.detailedBreakdown.arrival.icao}/{quote.detailedBreakdown.arrival.iata})
+                                <span className="ml-2 inline-flex items-center group relative cursor-help">
+                                  <Info size={10} className="text-gray-400" />
+                                  <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 w-32 p-2 bg-gray-900 text-[8px] text-white rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">Destination node and ground terminal.</span>
+                                </span>
+                              </p>
+                              <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Agent: {quote.detailedBreakdown.arrival.handlingAgency}</p>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+                                 <div>
+                                   <p className="text-[8px] font-black text-gray-400 uppercase">Navigational</p>
+                                   <p className="text-xs font-bold">${quote.detailedBreakdown.arrival.navigational.toLocaleString()}</p>
+                                 </div>
+                                 <div>
+                                   <p className="text-[8px] font-black text-gray-400 uppercase">Terminal</p>
+                                   <p className="text-xs font-bold">${quote.detailedBreakdown.arrival.terminal.toLocaleString()}</p>
+                                 </div>
+                                 <div>
+                                   <p className="text-[8px] font-black text-gray-400 uppercase">Parking</p>
+                                   <p className="text-xs font-bold">${quote.detailedBreakdown.arrival.parking.toLocaleString()}</p>
+                                 </div>
+                                 <div>
+                                   <p className="text-[8px] font-black text-gray-400 uppercase">Fuel</p>
+                                   <p className="text-xs font-bold">${quote.detailedBreakdown.arrival.fuel.toLocaleString()}</p>
+                                 </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Catering & Services */}
+                          {quote.breakdown.catering > 0 && (
+                            <div className="flex gap-4 pt-6 border-t border-gray-50 dark:border-gray-800">
+                              <div className="shrink-0 w-8 h-8 bg-pink-100 dark:bg-pink-900/30 rounded-lg flex items-center justify-center text-pink-600">
+                                <Users size={14} />
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-center justify-between">
+                                  <p className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-tight">Catering & In-flight Services</p>
+                                  <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">${quote.breakdown.catering.toLocaleString()}</span>
+                                </div>
+                                <p className="text-[10px] text-gray-500 font-bold mt-1 uppercase tracking-widest">
+                                  {quote.intelligence?.find((s: string) => s.includes('CATERING')) || 'Passenger nutrition and hydration services included.'}
+                                </p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Summary */}
+                          <div className="pt-6 space-y-4">
+                            {quote.breakdown.catering > 0 && (
+                              <div className="flex justify-between items-center text-sm font-bold text-gray-500 dark:text-gray-400">
+                                <span className="uppercase tracking-widest text-[10px]">Catering (Standard/VIP)</span>
+                                <span>${quote.breakdown.catering.toLocaleString()}</span>
+                              </div>
+                            )}
+                            <div className="pt-4 border-t border-gray-100 dark:border-gray-800 flex justify-between items-center">
+                              <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Full Flight Charges</span>
+                              <span className="text-lg font-black text-indigo-600">${quote.totalCost.toLocaleString()}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
-
-                      {/* Arrival */}
-                      <div className="flex gap-4">
-                        <div className="shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center text-blue-600 font-black text-xs">ARR</div>
-                        <div className="flex-1">
-                          <p className="text-xs font-black text-gray-900 dark:text-white">{quote.detailedBreakdown.arrival.name} ({quote.detailedBreakdown.arrival.icao}/{quote.detailedBreakdown.arrival.iata})</p>
-                          <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Agent: {quote.detailedBreakdown.arrival.handlingAgency}</p>
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
-                             <div>
-                               <p className="text-[8px] font-black text-gray-400 uppercase">Navigational</p>
-                               <p className="text-xs font-bold">${quote.detailedBreakdown.arrival.navigational.toLocaleString()}</p>
-                             </div>
-                             <div>
-                               <p className="text-[8px] font-black text-gray-400 uppercase">Terminal</p>
-                               <p className="text-xs font-bold">${quote.detailedBreakdown.arrival.terminal.toLocaleString()}</p>
-                             </div>
-                             <div>
-                               <p className="text-[8px] font-black text-gray-400 uppercase">Parking</p>
-                               <p className="text-xs font-bold">${quote.detailedBreakdown.arrival.parking.toLocaleString()}</p>
-                             </div>
-                             <div>
-                               <p className="text-[8px] font-black text-gray-400 uppercase">Fuel</p>
-                               <p className="text-xs font-bold">${quote.detailedBreakdown.arrival.fuel.toLocaleString()}</p>
-                             </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Summary */}
-                      <div className="pt-4 border-t border-gray-100 dark:border-gray-800 flex justify-between items-center">
-                        <span className="text-xs font-black text-gray-400 uppercase tracking-widest">Full Flight Charges</span>
-                        <span className="text-lg font-black text-indigo-600">${quote.totalCost.toLocaleString()}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 <div className="mt-12 p-6 bg-gray-50 dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800">
                   <div className="flex items-center gap-2 mb-4">
@@ -633,18 +762,33 @@ export default function ACMIQuoteEngine({ onQuoteGenerated }: ACMIQuoteEnginePro
                 </div>
                 <h3 className="text-lg font-black uppercase tracking-tight mb-6">Market Insights</h3>
                 <div className="space-y-6">
-                  <div className="p-4 bg-white/10 rounded-2xl backdrop-blur-sm border border-white/10">
+                  <motion.div 
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 }}
+                    className="p-4 bg-white/10 rounded-2xl backdrop-blur-sm border border-white/10"
+                  >
                     <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200 mb-1">Seasonality Impact</p>
                     <p className="text-sm font-bold">{(seasonMultiplier > 1.2) ? 'High demand season detected. Rates are inflated by up to 40%.' : 'Stable market conditions. Standard seasonal rates apply.'}</p>
-                  </div>
-                  <div className="p-4 bg-white/10 rounded-2xl backdrop-blur-sm border border-white/10">
+                  </motion.div>
+                  <motion.div 
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="p-4 bg-white/10 rounded-2xl backdrop-blur-sm border border-white/10"
+                  >
                     <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200 mb-1">Urgency Factor</p>
                     <p className="text-sm font-bold">{(urgencyMultiplier > 1.5) ? 'Critical urgency detected. Operators prioritizing AOG and high-yield missions.' : 'Planned mission. Standard lead times allow for competitive bidding.'}</p>
-                  </div>
-                  <div className="p-4 bg-white/10 rounded-2xl backdrop-blur-sm border border-white/10">
+                  </motion.div>
+                  <motion.div 
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.3 }}
+                    className="p-4 bg-white/10 rounded-2xl backdrop-blur-sm border border-white/10"
+                  >
                     <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200 mb-1">Regional Demand</p>
                     <p className="text-sm font-bold">{(regionMultiplier > 1.3) ? 'High regional demand. Limited availability in the specified sector.' : 'Balanced regional supply. Multiple operator options available.'}</p>
-                  </div>
+                  </motion.div>
                 </div>
               </div>
 

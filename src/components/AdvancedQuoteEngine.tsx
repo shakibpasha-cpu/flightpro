@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { safeStringify } from '../utils/safeJson';
 import { 
   Calculator, Plane, MapPin, DollarSign, Fuel, Users, Zap, Search, Globe, 
   AlertCircle, Loader2, ChevronRight, TrendingUp, PieChart as PieChartIcon, 
@@ -95,7 +96,7 @@ export default function AdvancedQuoteEngine({ onQuoteGenerated }: AdvancedQuoteE
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: safeStringify(body)
       });
 
       if (!response.ok) throw new Error('API Error');
