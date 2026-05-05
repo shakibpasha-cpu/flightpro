@@ -79,6 +79,7 @@ function AirportPopup({ code }: { code: string }) {
               <div className="grid grid-cols-2 gap-x-2 gap-y-1">
                 <p><strong>Runway:</strong> {details.runwayLength?.toLocaleString()} ft</p>
                 <p><strong>Elevation:</strong> {details.elevation?.toLocaleString()} ft</p>
+                <p className="col-span-2"><strong>Timezone:</strong> {details.timezone || 'N/A'}</p>
                 <p className="col-span-2"><strong>Fuel:</strong> {details.fuelAvailability}</p>
                 <p className="col-span-2 text-indigo-600 dark:text-indigo-400 font-bold"><strong>ATIS:</strong> {details.atisFrequency || 'N/A'}</p>
               </div>

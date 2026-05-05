@@ -27,6 +27,7 @@ import {
 } from 'recharts';
 import { motion } from 'motion/react';
 import { createNotification, notifySignificantDelay, notifyWeatherChange } from '../services/notificationService';
+import IcaoSearchTool from './IcaoSearchTool';
 
 const revenueData = [
   { name: 'Jan', revenue: 45000, margin: 8500 },
@@ -132,6 +133,8 @@ export default function DashboardOverview() {
           color="bg-blue-50 dark:bg-blue-900/30"
         />
       </div>
+
+      <IcaoSearchTool />
 
       {/* Reality Check / Platform Edge */}
       <div className="bg-gradient-to-r from-gray-900 to-indigo-950 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden">

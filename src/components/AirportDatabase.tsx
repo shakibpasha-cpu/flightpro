@@ -968,6 +968,7 @@ export default function AirportDatabase() {
                       <p className="font-mono text-sm text-gray-800 dark:text-gray-200">{liveWeather.metar}</p>
                       <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mt-4 mb-2">TAF</h4>
                       <p className="font-mono text-sm text-gray-800 dark:text-gray-200">{liveWeather.taf}</p>
+                      <p className="text-[10px] text-indigo-400 dark:text-indigo-400 mt-4 font-bold uppercase tracking-widest">Last Updated: {liveWeather.last_updated ? new Date(liveWeather.last_updated).toLocaleString() : new Date().toLocaleString()}</p>
                     </div>
                   ) : (
                     <p className="text-sm text-gray-500 dark:text-gray-400 italic">Weather data unavailable.</p>

@@ -1,5 +1,5 @@
-import React from 'react';
-import { DollarSign, ChevronDown, ChevronUp, Users, Mail, Phone, CheckCircle2, ShieldCheck, Tag } from 'lucide-react';
+import React, { useState } from 'react';
+import { DollarSign, ChevronDown, ChevronUp, Users, Mail, Phone, CheckCircle2, ShieldCheck, Tag, Search } from 'lucide-react';
 
 const sortHandlingAgents = (agents: HandlingAgent[]) => {
   return [...agents].sort((a, b) => {
@@ -72,7 +72,27 @@ interface CostingEngineProps {
 }
 
 export default function CostingEngine({ legs, totalCosts, currency = '$', onLegCostChange, onSelectAgent }: CostingEngineProps) {
-  const [expandedLeg, setExpandedLeg] = React.useState<number | null>(null);
+  const [expandedLeg, setExpandedLeg] = useState<number | null>(null);
+  const [searchQueries, setSearchQueries] = useState<Record<string, string>>({});
+
+  const handleAgentSearch = (legIdx: number, type: 'departure' | 'destination', query: string) => {
+    setSearchQueries(prev => ({
+      ...prev,
+      [`${legIdx}-${type}`]: query
+    }));
+  };
+
+  const getFilteredAgents = (agents: HandlingAgent[] | undefined, query: string) => {
+    if (!agents) return [];
+    if (!query) return agents;
+    const lowerQuery = query.toLowerCase();
+    return agents.filter(a => 
+      a.companyName.toLowerCase().includes(lowerQuery) || 
+      a.email.toLowerCase().includes(lowerQuery) || 
+      (a.additionalServices && a.additionalServices.toLowerCase().includes(lowerQuery))
+    );
+  };
+
 
   const costItems = [
     { key: 'acmiRate', label: 'ACMI Cost' },
@@ -243,29 +263,41 @@ export default function CostingEngine({ legs, totalCosts, currency = '$', onLegC
                     <div className="md:col-span-2 lg:col-span-3 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-6">
                       {/* Departure Handling */}
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                           <h5 className="text-[10px] text-indigo-600 dark:text-indigo-400 font-black uppercase tracking-widest flex items-center gap-1.5">
                             <Users size={12} />
                             Select Handling Agent at {leg.departure} (Departure)
                           </h5>
+                          <div className="w-full sm:w-48 relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                            <input 
+                              type="text" 
+                              placeholder="Search handlers..." 
+                              value={searchQueries[`${idx}-departure`] || ''}
+                              onChange={(e) => handleAgentSearch(idx, 'departure', e.target.value)}
+                              className="w-full pl-9 pr-3 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                          </div>
                         </div>
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {leg.departureHandlingAgents && leg.departureHandlingAgents.length > 0 ? (
-                            sortHandlingAgents(leg.departureHandlingAgents).map((agent, agentIdx) => {
-                              const isSelected = leg.selectedDepartureHandlingAgent?.companyName === agent.companyName;
-                              return (
-                                <div 
-                                  key={agentIdx}
-                                  onClick={() => onSelectAgent?.(idx, agent, 'departure')}
-                                  className={`p-3 rounded-xl border transition-all cursor-pointer relative group ${
-                                    isSelected 
-                                      ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/20' 
-                                      : agent.aiVerifiedPremium
-                                        ? 'border-amber-200 dark:border-amber-900/30 bg-gradient-to-br from-white to-amber-50 dark:from-gray-900 dark:to-amber-900/10 hover:border-amber-400'
-                                        : 'border-gray-100 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-900/20 bg-white dark:bg-gray-900'
-                                  }`}
-                                >
+                          {(() => {
+                            const filteredDep = getFilteredAgents(leg.departureHandlingAgents, searchQueries[`${idx}-departure`] || '');
+                            return filteredDep.length > 0 ? (
+                              sortHandlingAgents(filteredDep).map((agent, agentIdx) => {
+                                const isSelected = leg.selectedDepartureHandlingAgent?.companyName === agent.companyName;
+                                return (
+                                  <div 
+                                    key={agentIdx}
+                                    onClick={() => onSelectAgent?.(idx, agent, 'departure')}
+                                    className={`p-3 rounded-xl border transition-all cursor-pointer relative group ${
+                                      isSelected 
+                                        ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/20' 
+                                        : agent.aiVerifiedPremium
+                                          ? 'border-amber-200 dark:border-amber-900/30 bg-gradient-to-br from-white to-amber-50 dark:from-gray-900 dark:to-amber-900/10 hover:border-amber-400'
+                                          : 'border-gray-100 dark:border-gray-700 hover:border-indigo-200 dark:hover:border-indigo-900/20 bg-white dark:bg-gray-900'
+                                    }`}
+                                  >
                                   <div className="flex justify-between items-start mb-2 gap-2">
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -307,39 +339,52 @@ export default function CostingEngine({ legs, totalCosts, currency = '$', onLegC
                                 </div>
                               );
                             })
-                          ) : (
-                            <div className="col-span-full py-4 text-center bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
-                              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">No agents found for {leg.departure}</p>
-                            </div>
-                          )}
+                            ) : (
+                              <div className="col-span-full py-4 text-center bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
+                                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">No agents found for {leg.departure}</p>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
 
                       {/* Destination Handling */}
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                           <h5 className="text-[10px] text-amber-600 dark:text-amber-400 font-black uppercase tracking-widest flex items-center gap-1.5">
                             <Users size={12} />
                             Select Handling Agent at {leg.destination} (Destination)
                           </h5>
+                          <div className="w-full sm:w-48 relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                            <input 
+                              type="text" 
+                              placeholder="Search handlers..." 
+                              value={searchQueries[`${idx}-destination`] || ''}
+                              onChange={(e) => handleAgentSearch(idx, 'destination', e.target.value)}
+                              className="w-full pl-9 pr-3 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                            />
+                          </div>
                         </div>
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {leg.handlingAgents && leg.handlingAgents.length > 0 ? (
-                            sortHandlingAgents(leg.handlingAgents).map((agent, agentIdx) => {
-                              const isSelected = leg.selectedHandlingAgent?.companyName === agent.companyName;
-                              return (
-                                <div 
-                                  key={agentIdx}
-                                  onClick={() => onSelectAgent?.(idx, agent, 'destination')}
-                                  className={`p-3 rounded-xl border transition-all cursor-pointer relative group ${
-                                    isSelected 
-                                      ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-900/20' 
-                                      : agent.aiVerifiedPremium
-                                        ? 'border-amber-200 dark:border-amber-900/30 bg-gradient-to-br from-white to-amber-50 dark:from-gray-900 dark:to-amber-900/10 hover:border-amber-400'
-                                        : 'border-gray-100 dark:border-gray-700 hover:border-amber-200 dark:hover:border-amber-900/20 bg-white dark:bg-gray-900'
-                                  }`}
-                                >
+                          {(() => {
+                            const filteredDest = getFilteredAgents(leg.handlingAgents, searchQueries[`${idx}-destination`] || '');
+                            return filteredDest.length > 0 ? (
+                              sortHandlingAgents(filteredDest).map((agent, agentIdx) => {
+                                const isSelected = leg.selectedHandlingAgent?.companyName === agent.companyName;
+                                return (
+                                  <div 
+                                    key={agentIdx}
+                                    onClick={() => onSelectAgent?.(idx, agent, 'destination')}
+                                    className={`p-3 rounded-xl border transition-all cursor-pointer relative group ${
+                                      isSelected 
+                                        ? 'border-amber-500 bg-amber-50/50 dark:bg-amber-900/20' 
+                                        : agent.aiVerifiedPremium
+                                          ? 'border-amber-200 dark:border-amber-900/30 bg-gradient-to-br from-white to-amber-50 dark:from-gray-900 dark:to-amber-900/10 hover:border-amber-400'
+                                          : 'border-gray-100 dark:border-gray-700 hover:border-amber-200 dark:hover:border-amber-900/20 bg-white dark:bg-gray-900'
+                                    }`}
+                                  >
                                   <div className="flex justify-between items-start mb-2 gap-2">
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -381,11 +426,12 @@ export default function CostingEngine({ legs, totalCosts, currency = '$', onLegC
                                 </div>
                               );
                             })
-                          ) : (
-                            <div className="col-span-full py-4 text-center bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
-                              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">No agents found for {leg.destination}</p>
-                            </div>
-                          )}
+                            ) : (
+                              <div className="col-span-full py-4 text-center bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
+                                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">No agents found for {leg.destination}</p>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>

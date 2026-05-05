@@ -18,12 +18,14 @@ interface Flight {
   departureCoords?: { lat: number; lng: number };
   destinationCoords?: { lat: number; lng: number };
   departureDetails?: {
+    timezone?: string;
     runwayLength?: number;
     elevation?: number;
     fuelTypes?: string[];
     handlingAvailable?: boolean;
   };
   destinationDetails?: {
+    timezone?: string;
     runwayLength?: number;
     elevation?: number;
     fuelTypes?: string[];
@@ -874,6 +876,12 @@ export default function ScheduleBuilder() {
                                     <p className="text-[8px] text-gray-500 uppercase font-bold">Coords</p>
                                     <p className="text-[9px] font-mono">{flight.departureCoords.lat.toFixed(4)}, {flight.departureCoords.lng.toFixed(4)}</p>
                                   </div>
+                                  {flight.departureDetails?.timezone && (
+                                    <div className="col-span-2">
+                                      <p className="text-[8px] text-gray-500 uppercase font-bold">Timezone</p>
+                                      <p className="text-[9px]">{flight.departureDetails.timezone}</p>
+                                    </div>
+                                  )}
                                   {flight.departureDetails?.elevation !== undefined && (
                                     <div>
                                       <p className="text-[8px] text-gray-500 uppercase font-bold">Elevation</p>
@@ -918,6 +926,12 @@ export default function ScheduleBuilder() {
                                     <p className="text-[8px] text-gray-500 uppercase font-bold">Coords</p>
                                     <p className="text-[9px] font-mono">{flight.destinationCoords.lat.toFixed(4)}, {flight.destinationCoords.lng.toFixed(4)}</p>
                                   </div>
+                                  {flight.destinationDetails?.timezone && (
+                                    <div className="col-span-2">
+                                      <p className="text-[8px] text-gray-500 uppercase font-bold">Timezone</p>
+                                      <p className="text-[9px]">{flight.destinationDetails.timezone}</p>
+                                    </div>
+                                  )}
                                   {flight.destinationDetails?.elevation !== undefined && (
                                     <div>
                                       <p className="text-[8px] text-gray-500 uppercase font-bold">Elevation</p>

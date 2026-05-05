@@ -182,7 +182,9 @@ export default function MissionSummary({
                 <div className="absolute left-[-5px] top-1 w-[10px] h-[10px] rounded-full bg-indigo-600 dark:bg-indigo-400" />
                 <div className="flex justify-between items-start">
                   <div>
-                    <p className="text-xs font-black text-gray-900 dark:text-white">{leg.departure} → {leg.destination}</p>
+                    <p className="text-xs font-black text-gray-900 dark:text-white">
+                      {leg.departure} {airportDetails?.[leg.departure]?.timezone ? `(${airportDetails[leg.departure].timezone})` : ''} → {leg.destination} {airportDetails?.[leg.destination]?.timezone ? `(${airportDetails[leg.destination].timezone})` : ''}
+                    </p>
                     <p className="text-[10px] text-gray-500 font-medium">Distance: {Math.round(leg.metrics?.distance || 0)} NM | Time: {leg.metrics?.flightTime.toFixed(1)} hrs</p>
                   </div>
                   <div className="text-right">

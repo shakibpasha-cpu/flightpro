@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { calculateACMIMission, MissionParams, ACMIEngineResult, suggestCheaperAlternatives, calculateACMILease, LeaseResult } from '../services/acmiEngineService';
-import { getFIRDetails } from '../services/aiService';
+import { getFIRDetails, getDetailedPDFReportData } from '../services/aiService';
 
 interface Aircraft {
   id: string;
@@ -257,7 +257,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
     }
   };
 
-  const handleExportQuote = () => {
+  const handleExportQuote = async () => {
     setIsExporting(true);
     
     try {
@@ -272,14 +272,16 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
       doc.setFontSize(10);
       doc.setTextColor(100, 100, 100);
       doc.text(`Generated on: ${timestamp}`, 105, 28, { align: 'center' });
+
+      let finalY = 45;
       
-      // Aircraft Info
+      // Fallback or Basic Engine Info
       doc.setFontSize(14);
       doc.setTextColor(0, 0, 0);
-      doc.text('Aircraft Details', 14, 45);
+      doc.text('Base Aircraft Quoted', 14, finalY);
       
       autoTable(doc, {
-        startY: 50,
+        startY: finalY + 5,
         head: [['Property', 'Value']],
         body: [
           ['Aircraft Type', selectedAircraft?.type || 'N/A'],
@@ -292,11 +294,12 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
         headStyles: { fillColor: [79, 70, 229] }
       });
 
-      let finalY = (doc as any).lastAutoTable.finalY + 15;
+      finalY = (doc as any).lastAutoTable.finalY + 15;
 
       if (missionType === 'ACMI Lease' && leaseResult) {
+        if (finalY > 250) { doc.addPage(); finalY = 20; }
         doc.setFontSize(14);
-        doc.text('Lease Financial Summary', 14, finalY);
+        doc.text('Lease Engine Technical Summary', 14, finalY);
         
         autoTable(doc, {
           startY: finalY + 5,
@@ -314,29 +317,14 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
         });
         
         finalY = (doc as any).lastAutoTable.finalY + 15;
-        
-        if (leaseResult.aiPrediction) {
-          doc.setFontSize(14);
-          doc.text('AI Market Analysis', 14, finalY);
-          
-          autoTable(doc, {
-            startY: finalY + 5,
-            head: [['Metric', 'Prediction / Value']],
-            body: [
-              ['Predicted Monthly Fee', `${leaseResult.aiPrediction.predictedMonthlyFixedFee.toLocaleString()}`],
-              ['Predicted Hourly Rate', `${leaseResult.aiPrediction.predictedHourlyRate.toLocaleString()}/hr`],
-              ['Market Demand', leaseResult.aiPrediction.marketDemand],
-              ['Confidence Score', `${leaseResult.aiPrediction.confidenceScore}%`],
-              ['AI Reasoning', leaseResult.aiPrediction.reasoning],
-            ],
-            theme: 'plain',
-            headStyles: { fillColor: [79, 70, 229] }
-          });
-        }
-      } else if (engineResult) {
+      } else if (engineResult) { // only show duplicate breakdown if AI failed
+        if (finalY > 250) { doc.addPage(); finalY = 20; }
         doc.setFontSize(14);
-        doc.text('Mission Cost Breakdown', 14, finalY);
+        doc.text('Mission Base Cost Generation Breakdown', 14, finalY);
         
+        const operationalSum = (blockHours * acmiRate) + fuelCost + overflightCharges + landingFees + handlingFees + parkingFees + crewDutyCost + positioningCost + cateringCost;
+        const totalCostCalc = (operationalSum * insuranceMultiplier) + contingency + brokerMargin;
+
         autoTable(doc, {
           startY: finalY + 5,
           head: [['Cost Component', 'Amount']],
@@ -349,7 +337,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
             ['Catering Costs', `${cateringCost.toLocaleString()}`],
             ['Positioning Cost', `${positioningCost.toLocaleString()}`],
             ['Broker Margin', `${brokerMargin.toLocaleString()}`],
-            ['Total Estimated Cost', `${totalCost.toLocaleString()}`],
+            ['Total Estimated Cost', `${totalCostCalc.toLocaleString()}`],
           ],
           theme: 'grid',
           headStyles: { fillColor: [79, 70, 229] }
@@ -376,6 +364,194 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
     }
   };
 
+  const handleExportOpSpec = async () => {
+    setIsExporting(true);
+    
+    try {
+      const doc = new jsPDF();
+      const timestamp = new Date().toLocaleString();
+      
+      // Attempt to get detailed data
+      let detailedData = null;
+      if (departure && destination && selectedAircraft) {
+        detailedData = await getDetailedPDFReportData(
+          departure, destination, selectedAircraft.type, 
+          { missionType, date, passengers, payload },
+          { engineResult, leaseResult }
+        );
+      }
+      
+      // Header
+      doc.setFontSize(22);
+      doc.setTextColor(79, 70, 229); // Indigo-600
+      doc.text('MISSION OPERATIONAL SPECIFICATION', 105, 20, { align: 'center' });
+      
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`Generated on: ${timestamp}`, 105, 28, { align: 'center' });
+
+      // Visual Map Placeholder / Route Header
+      doc.setFillColor(245, 247, 255);
+      doc.rect(14, 35, 182, 20, 'F');
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      if (detailedData?.routeOverview) {
+        doc.text(`FLIGHT ROUTE: ${departure} to ${destination} | DISTANCE: ${detailedData.routeOverview.distanceNM} NM`, 105, 47, { align: 'center' });
+      } else {
+        doc.text(`FLIGHT ROUTE: ${departure} to ${destination}`, 105, 47, { align: 'center' });
+      }
+
+      let finalY = 65;
+      
+      if (detailedData) {
+        // Departure Airport Info
+        doc.setFontSize(14);
+        doc.setTextColor(79, 70, 229);
+        doc.text('1. Departure Airport Information', 14, finalY);
+        finalY += 8;
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        
+        const depParams = [
+          ['ICAO/IATA', `${detailedData.departureInfo?.icao || departure} / ${detailedData.departureInfo?.iata || '-'}`],
+          ['Elevation (ft)', `${detailedData.departureInfo?.elevationFt || '-'}`],
+          ['Runways', detailedData.departureInfo?.runways || '-'],
+          ['Parking / Tubes', `${detailedData.departureInfo?.parkingInfo || '-'} / ${detailedData.departureInfo?.jetTubesAvailable ? 'Yes' : 'No'}`],
+          ['Est. Terminal Charges', `$${detailedData.departureInfo?.estimatedCharges?.terminal || 0}`],
+          ['Parking / Night Charges', `$${detailedData.departureInfo?.estimatedCharges?.parking || 0} / $${detailedData.departureInfo?.estimatedCharges?.nightParking || 0}`],
+        ];
+        
+        autoTable(doc, { startY: finalY, body: depParams, theme: 'grid' });
+        finalY = (doc as any).lastAutoTable.finalY + 10;
+        
+        if (detailedData.departureInfo?.handlingAgencies?.length > 0) {
+          doc.text('Handling Agencies:', 14, finalY);
+          finalY += 5;
+          detailedData.departureInfo.handlingAgencies.forEach((agency: any) => {
+            doc.text(`- ${agency.name}: ${agency.services}`, 14, finalY);
+            finalY += 5;
+          });
+          finalY += 5;
+        }
+
+        doc.setTextColor(0,0,255);
+        if (detailedData.departureInfo?.caaInfo?.url) doc.textWithLink(`CAA Info: ${detailedData.departureInfo.caaInfo.name}`, 14, finalY, { url: detailedData.departureInfo.caaInfo.url });
+        finalY += 6;
+        if (detailedData.departureInfo?.aipInfo?.url) doc.textWithLink('AIP Info Source', 14, finalY, { url: detailedData.departureInfo.aipInfo.url });
+        doc.setTextColor(0,0,0);
+        
+        finalY += 15;
+        
+        // FIRs and Enroute Profile
+        if (finalY > 250) { doc.addPage(); finalY = 20; }
+        doc.setFontSize(14);
+        doc.setTextColor(79, 70, 229);
+        doc.text('2. Enroute Flight Profile & FIR Analysis', 14, finalY);
+        finalY += 8;
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        doc.text(`Climb: ${detailedData.enrouteProfile?.climbProfile || '-'} | FL: ${detailedData.enrouteProfile?.cruiseFlightLevel || '-'} | FuelFlow: ${detailedData.enrouteProfile?.averageFuelFlow || '-'}`, 14, finalY);
+        finalY += 8;
+        
+        if (detailedData.enrouteProfile?.firs?.length > 0) {
+          autoTable(doc, {
+            startY: finalY,
+            head: [['FIR Name', 'Code', 'Est. Charge', 'Permit Procedure (Time)']],
+            body: detailedData.enrouteProfile.firs.map((fir: any) => [
+              fir.name || '-', fir.code || '-', `$${fir.estimatedCharges || 0}`, `${fir.permitProcedure || '-'} (${fir.leadTime || '-'})`
+            ]),
+            theme: 'striped'
+          });
+          finalY = (doc as any).lastAutoTable.finalY + 15;
+        }
+
+        // Arrival Airport Info
+        if (finalY > 200) { doc.addPage(); finalY = 20; }
+        doc.setFontSize(14);
+        doc.setTextColor(79, 70, 229);
+        doc.text('3. Arrival Airport Information', 14, finalY);
+        finalY += 8;
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        
+        const arrParams = [
+          ['ICAO/IATA', `${detailedData.arrivalInfo?.icao || destination} / ${detailedData.arrivalInfo?.iata || '-'}`],
+          ['Elevation (ft)', `${detailedData.arrivalInfo?.elevationFt || '-'}`],
+          ['Runways', detailedData.arrivalInfo?.runways || '-'],
+          ['Parking / Tubes', `${detailedData.arrivalInfo?.parkingInfo || '-'} / ${detailedData.arrivalInfo?.jetTubesAvailable ? 'Yes' : 'No'}`],
+          ['Est. Terminal Charges', `$${detailedData.arrivalInfo?.estimatedCharges?.terminal || 0}`],
+          ['Parking / Night Charges', `$${detailedData.arrivalInfo?.estimatedCharges?.parking || 0} / $${detailedData.arrivalInfo?.estimatedCharges?.nightParking || 0}`],
+        ];
+        autoTable(doc, { startY: finalY, body: arrParams, theme: 'grid' });
+        finalY = (doc as any).lastAutoTable.finalY + 10;
+        
+        if (detailedData.arrivalInfo?.handlingAgencies?.length > 0) {
+          doc.text('Handling Agencies:', 14, finalY);
+          finalY += 5;
+          detailedData.arrivalInfo.handlingAgencies.forEach((agency: any) => {
+            doc.text(`- ${agency.name}: ${agency.services}`, 14, finalY);
+            finalY += 5;
+          });
+          finalY += 5;
+        }
+
+        doc.setTextColor(0,0,255);
+        if (detailedData.arrivalInfo?.caaInfo?.url) doc.textWithLink(`CAA Info: ${detailedData.arrivalInfo.caaInfo.name}`, 14, finalY, { url: detailedData.arrivalInfo.caaInfo.url });
+        finalY += 6;
+        if (detailedData.arrivalInfo?.aipInfo?.url) doc.textWithLink('AIP Info Source', 14, finalY, { url: detailedData.arrivalInfo.aipInfo.url });
+        doc.setTextColor(0,0,0);
+        
+        finalY += 15;
+
+        // Final Cost Summary Details from JSON
+        if (finalY > 220) { doc.addPage(); finalY = 20; }
+        doc.setFontSize(14);
+        doc.setTextColor(79, 70, 229);
+        doc.text('4. Comprehensive Mission Financials', 14, finalY);
+        finalY += 10;
+        
+        const sumTable = [
+          ['ACMI Rate / Total', detailedData.costSummary?.acmiRateAndTotal || '-'],
+          ['Fuel Consumption', detailedData.costSummary?.fuelConsumption || '-'],
+          ['Overflight Charges', detailedData.costSummary?.overflightCharges || '-'],
+          ['Airport / Landing Fees', detailedData.costSummary?.airportFees || '-'],
+          ['Ground Handling', detailedData.costSummary?.handling || '-'],
+          ['Parking Fees', detailedData.costSummary?.parking || '-'],
+          ['Crew Duty Cost', detailedData.costSummary?.crewDuty || '-'],
+          ['Positioning Cost', detailedData.costSummary?.positioning || '-'],
+          ['Insurance / Risk', detailedData.costSummary?.insurance || '-'],
+          ['Catering', detailedData.costSummary?.catering || '-'],
+          ['Profit Margin', detailedData.costSummary?.profitMargin || '-']
+        ];
+        
+        autoTable(doc, { startY: finalY, head: [['Expense Category', 'Estimate / Notes']], body: sumTable, theme: 'grid', headStyles: { fillColor: [79, 70, 229] } });
+        finalY = (doc as any).lastAutoTable.finalY + 15;
+      } else {
+        doc.setFontSize(14);
+        doc.setTextColor(255, 0, 0);
+        doc.text('Advanced AI operational details unavailable.', 14, finalY);
+      }
+
+      // Add footer to all pages
+      const pageCount = (doc as any).internal.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text('CONFIDENTIAL - Mission Operational Specification', 105, 285, { align: 'center' });
+        doc.text(`Page ${i} of ${pageCount}`, 190, 285, { align: 'right' });
+      }
+
+      doc.save(`Mission_Op_Spec_${selectedAircraft?.type || 'Aircraft'}_${new Date().getTime()}.pdf`);
+      
+    } catch (error) {
+      console.error('PDF Export failed:', error);
+      alert('Failed to export Op Spec PDF. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const operationalSum = (blockHours * acmiRate) + fuelCost + overflightCharges + landingFees + handlingFees + parkingFees + crewDutyCost + positioningCost + cateringCost;
   const totalCost = missionType === 'ACMI Lease' 
     ? (leaseResult?.totalLeaseCost || 0)
@@ -390,16 +566,28 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
         </div>
         <div className="flex items-center gap-4">
           {(engineResult || leaseResult) && (
-            <motion.button 
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={handleExportQuote}
-              disabled={isExporting}
-              className="flex items-center gap-2 px-6 py-3 bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 rounded-2xl font-black uppercase tracking-widest text-xs border border-indigo-100 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all shadow-sm disabled:opacity-50"
-            >
-              {isExporting ? <Loader2 size={16} className="animate-spin" /> : <PlusCircle size={16} />}
-              {isExporting ? 'Generating PDF...' : 'Export Detailed Quote'}
-            </motion.button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <motion.button 
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleExportQuote}
+                disabled={isExporting}
+                className="flex items-center justify-center gap-2 px-6 py-3 bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 rounded-2xl font-black uppercase tracking-widest text-xs border border-indigo-100 dark:border-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-all shadow-sm disabled:opacity-50"
+              >
+                {isExporting ? <Loader2 size={16} className="animate-spin" /> : <PlusCircle size={16} />}
+                Quote Summary
+              </motion.button>
+              <motion.button 
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleExportOpSpec}
+                disabled={isExporting}
+                className="flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs border border-transparent hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none disabled:opacity-50"
+              >
+                {isExporting ? <Loader2 size={16} className="animate-spin" /> : <PlusCircle size={16} />}
+                Mission Op Spec
+              </motion.button>
+            </div>
           )}
           <motion.div 
             initial={{ scale: 0.9, opacity: 0 }}

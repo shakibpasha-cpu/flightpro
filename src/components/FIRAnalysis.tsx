@@ -27,6 +27,10 @@ interface Leg {
   departure: string;
   destination: string;
   firs: FIR[];
+  firName?: string;
+  country?: string;
+  overflightCharges?: number;
+  navigationCharges?: number;
   costs?: {
     total: number;
   };
@@ -70,6 +74,10 @@ export default function FIRAnalysis({ legs, firs: initialFirs, departure: initia
             navigationCharge: f.navigationCharge,
             rules: f.rules
           })),
+          firName: result.firs.map((f: any) => f.firName || f.name).join(', ') || 'N/A',
+          country: [...new Set(result.firs.map((f: any) => f.country).filter(Boolean))].join(', ') || 'N/A',
+          overflightCharges: result.totalOverflightCost || 0,
+          navigationCharges: result.totalNavigationCost || 0,
           costs: { total: result.totalOverflightCost + result.totalNavigationCost }
         };
         setDisplayLegs([newLeg]);

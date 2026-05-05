@@ -1449,7 +1449,8 @@ export default function App() {
                           {airportDetails[formData.departure] && (
                             <div className="mt-1 px-3 py-1 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-100 dark:border-indigo-900/50">
                               <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
-                                {airportDetails[formData.departure].name} • RWY: {airportDetails[formData.departure].runwayLength}ft • ELEV: {airportDetails[formData.departure].elevation}ft
+                                {airportDetails[formData.departure].name} <span className="text-indigo-400">|</span> RWY: {airportDetails[formData.departure].runwayLength}ft <span className="text-indigo-400">|</span> ELEV: {airportDetails[formData.departure].elevation}ft
+                                {airportDetails[formData.departure].timezone && <span className="font-black text-amber-600 dark:text-amber-400 ml-1"> <span className="text-indigo-400">|</span> TZ: {airportDetails[formData.departure].timezone}</span>}
                               </p>
                               <p className="text-[9px] text-gray-500 dark:text-gray-400">
                                 Lat: {airportDetails[formData.departure].lat.toFixed(4)} Lng: {airportDetails[formData.departure].lng.toFixed(4)} • ATIS: {airportDetails[formData.departure].atisFrequency}
@@ -1489,7 +1490,8 @@ export default function App() {
                             {airportDetails[stop] && (
                               <div className="px-3 py-1 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-100 dark:border-indigo-900/50">
                                 <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
-                                  {airportDetails[stop].name} • RWY: {airportDetails[stop].runwayLength}ft • ELEV: {airportDetails[stop].elevation}ft
+                                  {airportDetails[stop].name} <span className="text-indigo-400">|</span> RWY: {airportDetails[stop].runwayLength}ft <span className="text-indigo-400">|</span> ELEV: {airportDetails[stop].elevation}ft
+                                  {airportDetails[stop].timezone && <span className="font-black text-amber-600 dark:text-amber-400 ml-1"> <span className="text-indigo-400">|</span> TZ: {airportDetails[stop].timezone}</span>}
                                 </p>
                                 <p className="text-[9px] text-gray-500 dark:text-gray-400">
                                   Lat: {airportDetails[stop].lat.toFixed(4)} Lng: {airportDetails[stop].lng.toFixed(4)} • ATIS: {airportDetails[stop].atisFrequency}
@@ -1525,7 +1527,8 @@ export default function App() {
                             <div className="mt-1 space-y-2">
                               <div className="px-3 py-1 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-100 dark:border-indigo-900/50">
                                 <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">
-                                  {airportDetails[formData.destination].name} • RWY: {airportDetails[formData.destination].runwayLength}ft • ELEV: {airportDetails[formData.destination].elevation}ft
+                                  {airportDetails[formData.destination].name} <span className="text-indigo-400">|</span> RWY: {airportDetails[formData.destination].runwayLength}ft <span className="text-indigo-400">|</span> ELEV: {airportDetails[formData.destination].elevation}ft
+                                  {airportDetails[formData.destination].timezone && <span className="font-black text-amber-600 dark:text-amber-400 ml-1"> <span className="text-indigo-400">|</span> TZ: {airportDetails[formData.destination].timezone}</span>}
                                 </p>
                                 <p className="text-[9px] text-gray-500 dark:text-gray-400">
                                   Lat: {airportDetails[formData.destination].lat.toFixed(4)} Lng: {airportDetails[formData.destination].lng.toFixed(4)} • ATIS: {airportDetails[formData.destination].atisFrequency}

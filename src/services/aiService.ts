@@ -1879,6 +1879,7 @@ export async function getAirportDetails(code: string, forceRefresh: boolean = fa
   
   Required fields:
   - Latitude/Longitude (accurate decimal).
+  - Timezone (IANA timezone ID, e.g., Europe/London or America/New_York).
   - Runway length (longest runway in feet).
   - Elevation (in feet).
   - Operating hours (local time or H24).
@@ -1903,6 +1904,7 @@ export async function getAirportDetails(code: string, forceRefresh: boolean = fa
             lng: { type: Type.NUMBER },
             name: { type: Type.STRING },
             city: { type: Type.STRING },
+            timezone: { type: Type.STRING },
             runwayLength: { type: Type.NUMBER },
             elevation: { type: Type.NUMBER },
             operatingHours: { type: Type.STRING },
@@ -3154,6 +3156,60 @@ export async function getAircraftDetails(searchQuery: string) {
     return JSON.parse(response.text);
   } catch (error) {
     handleAiError(error, 'getAircraftDetails');
+    return null;
+  }
+}
+
+export async function getDetailedPDFReportData(departure: string, destination: string, aircraftType: string, missionParams: any, costBreakdown: any) {
+  const prompt = `Generate a highly detailed PDF export dataset for an aviation ACMI/Charter flight from ${departure} to ${destination} using aircraft ${aircraftType}.
+  
+  Return strictly a JSON object with this structure:
+  {
+    "routeOverview": { "distanceNM": number, "flightTimeChars": string, "airwayProfile": string },
+    "departureInfo": { 
+      "icao": string, "iata": string, "elevationFt": number, "runways": string,
+      "parkingInfo": string, "jetTubesAvailable": boolean,
+      "estimatedCharges": { "terminal": number, "parking": number, "nightParking": number },
+      "handlingAgencies": [{ "name": string, "services": string }],
+      "caaInfo": { "name": string, "url": string },
+      "aipInfo": { "url": string }
+    },
+    "enrouteProfile": {
+      "climbProfile": string, "cruiseFlightLevel": string, "averageFuelFlow": string,
+      "firs": [{ "name": string, "code": string, "estimatedCharges": number, "permitProcedure": string, "leadTime": string }]
+    },
+    "arrivalInfo": { 
+      "icao": string, "iata": string, "elevationFt": number, "runways": string,
+      "parkingInfo": string, "jetTubesAvailable": boolean,
+      "estimatedCharges": { "terminal": number, "parking": number, "nightParking": number },
+      "handlingAgencies": [{ "name": string, "services": string }],
+      "caaInfo": { "name": string, "url": string },
+      "aipInfo": { "url": string }
+    },
+    "costSummary": {
+      "acmiRateAndTotal": string, "fuelConsumption": string, "overflightCharges": string, 
+      "airportFees": string, "handling": string, "parking": string, 
+      "crewDuty": string, "positioning": string, "insurance": string, 
+      "catering": string, "profitMargin": string
+    }
+  }
+  
+  Do not include markdown or text outside JSON. Use google search to verify data.`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }]
+      },
+    });
+
+    return JSON.parse(response.text);
+  } catch (error) {
+    console.error('getDetailedPDFReportData error:', error);
     return null;
   }
 }

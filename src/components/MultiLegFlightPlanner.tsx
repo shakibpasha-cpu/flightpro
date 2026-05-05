@@ -75,6 +75,10 @@ interface Leg {
   aircraftType: string;
   passengers: number;
   cargoWeight: number;
+  firName?: string;
+  country?: string;
+  overflightCharges?: number;
+  navigationCharges?: number;
   handlingAgent?: HandlingAgentContact;
   restrictedAreas?: RestrictedArea[];
   firFees?: {
@@ -150,6 +154,7 @@ export default function MultiLegFlightPlanner() {
   const [showRestrictionsPanel, setShowRestrictionsPanel] = useState(false);
   const [isSavingAirport, setIsSavingAirport] = useState<Record<string, boolean>>({});
   const [enrichingLegIndex, setEnrichingLegIndex] = useState<number | null>(null);
+  const [handlingSearchQueries, setHandlingSearchQueries] = useState<Record<number, string>>({});
 
   useEffect(() => {
     // Dynamic import to avoid circular dependency or load issues
@@ -553,7 +558,11 @@ export default function MultiLegFlightPlanner() {
               overflight: result.totalOverflightCost || 0,
               navigation: result.totalNavigationCost || 0,
               total: (result.totalOverflightCost || 0) + (result.totalNavigationCost || 0)
-            }
+            },
+            firName: enrichedFirs.map((f: any) => f.firName || f.name).join(', ') || 'N/A',
+            country: [...new Set(enrichedFirs.map((f: any) => f.country).filter(Boolean))].join(', ') || 'N/A',
+            overflightCharges: result.totalOverflightCost || 0,
+            navigationCharges: result.totalNavigationCost || 0
           };
           planModified = true;
         }
@@ -1097,13 +1106,23 @@ export default function MultiLegFlightPlanner() {
             <label className="text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Payload & Schedule</label>
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
-                <div className="relative group/input">
-                  <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within/input:text-indigo-500" size={12} />
+                <div className="relative group/input mb-2">
+                  <Clock className="absolute left-2.5 top-5 -translate-y-1/2 text-gray-300 group-focus-within/input:text-indigo-500" size={12} />
                   <input type="time" value={leg.etd || ''} onChange={(e) => updateLeg(index, 'etd', e.target.value)} title="ETD" className="w-full pl-8 pr-2 py-2 bg-gray-50 dark:bg-gray-900 border border-transparent dark:border-transparent rounded-xl text-[10px] font-bold focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500/50 outline-none" />
+                  {airportDetails[leg.from]?.timezone && (
+                    <div className="absolute -bottom-3 left-1 text-[8px] text-gray-500 dark:text-gray-400 font-medium truncate max-w-[120px]" title={airportDetails[leg.from].timezone}>
+                      TZ: {airportDetails[leg.from].timezone}
+                    </div>
+                  )}
                 </div>
-                <div className="relative group/input">
-                  <Clock className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within/input:text-indigo-500" size={12} />
+                <div className="relative group/input mb-2">
+                  <Clock className="absolute left-2.5 top-5 -translate-y-1/2 text-gray-300 group-focus-within/input:text-indigo-500" size={12} />
                   <input type="time" value={leg.eta || ''} onChange={(e) => updateLeg(index, 'eta', e.target.value)} title="ETA" className="w-full pl-8 pr-2 py-2 bg-gray-50 dark:bg-gray-900 border border-transparent dark:border-transparent rounded-xl text-[10px] font-bold focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500/50 outline-none" />
+                  {airportDetails[leg.to]?.timezone && (
+                    <div className="absolute -bottom-3 left-1 text-[8px] text-gray-500 dark:text-gray-400 font-medium truncate max-w-[120px]" title={airportDetails[leg.to].timezone}>
+                      TZ: {airportDetails[leg.to].timezone}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -1241,15 +1260,39 @@ export default function MultiLegFlightPlanner() {
 
         {airportHandling[leg.to]?.agents && (
           <div className="mt-6 pt-5 border-t border-gray-100 dark:border-gray-800/50">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
               <div className="flex items-center gap-2">
                 <Zap size={14} className="text-amber-500" />
                 <h3 className="text-[10px] font-black text-gray-900 dark:text-white uppercase tracking-widest">Sourced support providers at {leg.to}</h3>
               </div>
-              <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">Click to Select & Auto-Populate</span>
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={12} />
+                  <input
+                    type="text"
+                    placeholder="Search agents..."
+                    value={handlingSearchQueries[index] || ''}
+                    onChange={(e) => setHandlingSearchQueries(prev => ({ ...prev, [index]: e.target.value }))}
+                    className="pl-8 pr-3 py-1.5 bg-gray-50 dark:bg-gray-900 border border-transparent dark:border-transparent focus:border-indigo-500/50 rounded-xl text-[10px] font-bold focus:ring-4 focus:ring-indigo-500/5 outline-none transition-all w-full sm:w-48"
+                  />
+                </div>
+                <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest hidden lg:block">Click to Select & Auto-Populate</span>
+              </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {airportHandling[leg.to].agents.map((agent: any, aIdx: number) => (
+              {(() => {
+                const searchQ = (handlingSearchQueries[index] || '').toLowerCase();
+                const filteredAgents = airportHandling[leg.to].agents.filter((a: any) => 
+                  !searchQ || a.companyName?.toLowerCase().includes(searchQ)
+                );
+                if (filteredAgents.length === 0) {
+                  return (
+                    <div className="col-span-full py-6 text-center bg-gray-50 dark:bg-gray-900/50 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700">
+                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">No agents found matching "{searchQ}"</p>
+                    </div>
+                  );
+                }
+                return filteredAgents.map((agent: any, aIdx: number) => (
                 <motion.div 
                   key={aIdx}
                   whileHover={{ scale: 1.02 }}
@@ -1300,7 +1343,8 @@ export default function MultiLegFlightPlanner() {
                     )}
                   </div>
                 </motion.div>
-              ))}
+              ));
+              })()}
             </div>
           </div>
         )}

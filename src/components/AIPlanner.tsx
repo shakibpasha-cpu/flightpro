@@ -593,6 +593,12 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
         }
 
         updatedLeg.firs = enrichedFirs;
+
+        // Store FIR data directly in the leg object as requested
+        updatedLeg.firName = enrichedFirs.map((f: any) => f.firName || f.name).join(', ') || 'N/A';
+        updatedLeg.country = [...new Set(enrichedFirs.map((f: any) => f.country).filter(Boolean))].join(', ') || 'N/A';
+        updatedLeg.overflightCharges = enrichedFirs.reduce((sum: number, f: any) => sum + (f.overflightCharge || 0), 0);
+        updatedLeg.navigationCharges = enrichedFirs.reduce((sum: number, f: any) => sum + (f.navigationCharge || 0), 0);
         
         // Update costs based on FIRs
         const totalOverflight = enrichedFirs.reduce((sum: number, f: any) => sum + (f.overflightCharge || 0), 0);
@@ -624,6 +630,15 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
           legChanged = true;
         }
       }
+      
+      // Store FIR data directly in the leg object as requested
+      if (updatedLeg.firs && updatedLeg.firs.length > 0) {
+        updatedLeg.firName = updatedLeg.firs.map((f: any) => f.firName || f.name).join(', ') || 'N/A';
+        updatedLeg.country = [...new Set(updatedLeg.firs.map((f: any) => f.country).filter(Boolean))].join(', ') || 'N/A';
+        updatedLeg.overflightCharges = updatedLeg.firs.reduce((sum: number, f: any) => sum + (f.overflightCharge || 0), 0);
+        updatedLeg.navigationCharges = updatedLeg.firs.reduce((sum: number, f: any) => sum + (f.navigationCharge || 0), 0);
+      }
+      
       if (legChanged) changed = true;
       return updatedLeg;
     }));
@@ -1153,7 +1168,7 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
           if (leg.destination) {
             const agentsResult = await searchHandlingAgents(leg.destination);
             if (agentsResult && agentsResult.agents) {
-              leg.handlingAgents = agentsResult.agents.slice(0, 3);
+              leg.handlingAgents = agentsResult.agents;
             }
           }
 
@@ -1161,7 +1176,7 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
           if (leg.departure) {
             const depAgentsResult = await searchHandlingAgents(leg.departure);
             if (depAgentsResult && depAgentsResult.agents) {
-              leg.departureHandlingAgents = depAgentsResult.agents.slice(0, 3);
+              leg.departureHandlingAgents = depAgentsResult.agents;
             }
           }
 

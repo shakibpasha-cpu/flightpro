@@ -1,5 +1,5 @@
-import React from 'react';
-import { Users, Mail, Phone, Globe, DollarSign, Building2, CheckCircle2, Zap } from 'lucide-react';
+import React, { useState } from 'react';
+import { Users, Mail, Phone, Globe, DollarSign, Building2, CheckCircle2, Zap, Search } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface HandlingAgent {
@@ -39,12 +39,38 @@ export default function HandlingAgentsPanel({
   onRefreshAgents,
   loading
 }: HandlingAgentsPanelProps) {
+  const [searchQueries, setSearchQueries] = useState<Record<string, string>>({});
+
+  const handleSearch = (legIdx: number, type: 'departure' | 'destination', query: string) => {
+    setSearchQueries(prev => ({
+      ...prev,
+      [`${legIdx}-${type}`]: query
+    }));
+  };
+
+  const getFilteredAgents = (agents: HandlingAgent[] | undefined, query: string) => {
+    if (!agents) return [];
+    if (!query) return agents;
+    const lowerQuery = query.toLowerCase();
+    return agents.filter(a => 
+      a.companyName.toLowerCase().includes(lowerQuery) || 
+      a.email.toLowerCase().includes(lowerQuery) || 
+      (a.additionalServices && a.additionalServices.toLowerCase().includes(lowerQuery))
+    );
+  };
+
   return (
     <div className="space-y-8">
       <div className="space-y-8">
         {legs.map((leg, legIdx) => {
           const selectedAgent = leg.selectedHandlingAgent;
           const selectedDepAgent = leg.selectedDepartureHandlingAgent;
+          
+          const depQuery = searchQueries[`${legIdx}-departure`] || '';
+          const destQuery = searchQueries[`${legIdx}-destination`] || '';
+          
+          const filteredDepAgents = getFilteredAgents(leg.departureHandlingAgents, depQuery);
+          const filteredDestAgents = getFilteredAgents(leg.handlingAgents, destQuery);
           
           return (
             <div key={legIdx} className="space-y-8">
@@ -57,8 +83,18 @@ export default function HandlingAgentsPanel({
                     </span>
                   </div>
                   <div className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
+                  <div className="w-48 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                    <input 
+                      type="text" 
+                      placeholder="Search agents..." 
+                      value={depQuery}
+                      onChange={(e) => handleSearch(legIdx, 'departure', e.target.value)}
+                      className="w-full pl-9 pr-3 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
                   <div className="flex items-center gap-2">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Departure Handling</p>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest hidden md:block">Departure Handling</p>
                     <button 
                       onClick={(e) => { e.stopPropagation(); onRefreshAgents?.(legIdx, 'departure'); }}
                       disabled={loading}
@@ -71,8 +107,8 @@ export default function HandlingAgentsPanel({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {leg.departureHandlingAgents && leg.departureHandlingAgents.length > 0 ? (
-                    leg.departureHandlingAgents.map((agent, agentIdx) => {
+                  {filteredDepAgents.length > 0 ? (
+                    filteredDepAgents.map((agent, agentIdx) => {
                       const isSelected = selectedDepAgent?.companyName === agent.companyName;
                       
                       return (
@@ -174,8 +210,18 @@ export default function HandlingAgentsPanel({
                     </span>
                   </div>
                   <div className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
+                  <div className="w-48 relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                    <input 
+                      type="text" 
+                      placeholder="Search agents..." 
+                      value={destQuery}
+                      onChange={(e) => handleSearch(legIdx, 'destination', e.target.value)}
+                      className="w-full pl-9 pr-3 py-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
                   <div className="flex items-center gap-2">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Destination Handling</p>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest hidden md:block">Destination Handling</p>
                     <button 
                       onClick={(e) => { e.stopPropagation(); onRefreshAgents?.(legIdx, 'destination'); }}
                       disabled={loading}
@@ -188,8 +234,8 @@ export default function HandlingAgentsPanel({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {leg.handlingAgents && leg.handlingAgents.length > 0 ? (
-                    leg.handlingAgents.map((agent, agentIdx) => {
+                  {filteredDestAgents.length > 0 ? (
+                    filteredDestAgents.map((agent, agentIdx) => {
                       const isSelected = selectedAgent?.companyName === agent.companyName;
                       
                       return (
