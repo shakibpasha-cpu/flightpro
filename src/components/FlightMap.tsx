@@ -4,10 +4,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAirportDetails, searchAirports, searchHandlingAgents, getLegFIRAnalysis } from '../services/aiService';
 import { getLiveWeather, getLiveNotams, MetarData, NotamData } from '../services/weatherService';
-import { Layers, Map as MapIcon, Compass, Wind, Shield, Info, X, ChevronRight, ChevronDown, GripVertical, ListOrdered, Clock, Trash2, Plus, Globe, Plane, Route, Users, Sparkles, Loader2, Mail, Phone, ExternalLink, Cloud, Activity, MousePointer2 } from 'lucide-react';
+import { Layers, Map as MapIcon, Compass, Wind, Shield, Info, X, ChevronRight, ChevronDown, GripVertical, ListOrdered, Clock, Trash2, Plus, Globe, Plane, Route, Users, Sparkles, Loader2, Mail, Phone, ExternalLink, Cloud, Activity, MousePointer2, ShieldAlert } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { getGlobalRestrictedAirspaces, getLiveSafetyAlerts, RestrictedAirspace as GlobalRestrictedAirspace } from '../services/safetyService';
-import { CHART_LAYERS, DefaultIcon, getBearing, getMidpoint, calculateDistance } from '../lib/mapConfig';
+import { CHART_LAYERS, DefaultIcon, getBearing, getMidpoint, calculateDistance, doesLegIntersectPolygon } from '../lib/mapConfig';
 
 
 
@@ -2392,7 +2392,14 @@ export default function FlightMap({
           
           {localLegs!.map((leg, idx) => {
             const isHovered = hoveredLegIndex === idx;
-            const hasRestricted = leg.restrictedAreas && leg.restrictedAreas.length > 0;
+            
+            // Check for intersections with global restricted airspaces
+            const intersectingGlobalAirspaces = globalRestrictedAirspaces.filter(as => 
+              doesLegIntersectPolygon(leg.departureCoords, leg.destinationCoords, as.coordinates)
+            );
+            const hasRestrictedIntersection = intersectingGlobalAirspaces.length > 0;
+            
+            const hasRestricted = (leg.restrictedAreas && leg.restrictedAreas.length > 0) || hasRestrictedIntersection;
             const hasSafetyIssues = hasRestricted || 
                                    safetyData?.notams?.some(n => n.airport === leg.departure || n.airport === leg.destination) ||
                                    safetyData?.weather?.some(w => w.location === leg.departure || w.location === leg.destination);
@@ -2569,6 +2576,46 @@ export default function FlightMap({
                     </div>
                   </Tooltip>
                 </Marker>
+
+                {/* Restricted Airspace Conflict Indicator */}
+                {hasRestrictedIntersection && (
+                   <Marker
+                    position={getMidpoint(leg.departureCoords.lat, leg.departureCoords.lng, leg.destinationCoords.lat, leg.destinationCoords.lng)}
+                    icon={L.divIcon({
+                      className: 'warning-icon',
+                      html: `<div class="flex items-center justify-center w-6 h-6 rounded-full bg-red-600 shadow-lg border-2 border-white animate-bounce">
+                               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                 <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+                                 <path d="M12 9v4"/>
+                                 <path d="M12 17h.01"/>
+                               </svg>
+                             </div>`,
+                      iconSize: [24, 24],
+                      iconAnchor: [12, 12]
+                    })}
+                  >
+                    <Tooltip direction="top" offset={[0, -15]} opacity={1} className="custom-tooltip">
+                      <div className="p-3 bg-red-600 text-white rounded-2xl shadow-xl border border-red-500 min-w-[180px]">
+                        <div className="flex items-center gap-2 mb-1.5 pb-1.5 border-b border-white/20">
+                          <ShieldAlert size={14} />
+                          <p className="text-[10px] font-black uppercase tracking-widest">Airspace Conflict</p>
+                        </div>
+                        <p className="text-[9px] font-bold text-white/90 leading-tight mb-2">This leg intersects with {intersectingGlobalAirspaces.length} restricted or sensitive area(s).</p>
+                        <div className="space-y-1">
+                          {intersectingGlobalAirspaces.map(as => (
+                            <div key={as.id} className="flex gap-1.5 items-start">
+                              <span className="shrink-0 w-1 h-1 bg-white rounded-full mt-1.5" />
+                              <div className="flex-1">
+                                <p className="text-[8px] font-black leading-none">{as.name}</p>
+                                <p className="text-[7px] font-bold opacity-70 leading-tight mt-0.5">{as.reason}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </Tooltip>
+                  </Marker>
+                )}
                 
                 {/* Outer Glow Polyline */}
                 <Polyline 
@@ -2662,11 +2709,31 @@ export default function FlightMap({
                         
                         {hasRestricted && (
                           <div className="mt-3 pt-3 border-t border-red-100 dark:border-red-900/30">
-                            <p className="text-red-600 dark:text-red-400 font-black mb-2 uppercase text-[9px] tracking-widest">⚠️ Restricted Airspaces</p>
-                            {leg.restrictedAreas!.map((area, aidx) => (
+                            <p className="text-red-600 dark:text-red-400 font-black mb-2 uppercase text-[9px] tracking-widest flex items-center gap-1">
+                              <ShieldAlert size={10} />
+                              <span>Restricted Airspaces</span>
+                            </p>
+                            
+                            {/* Local Leg Restricted Areas */}
+                            {leg.restrictedAreas?.map((area, aidx) => (
                               <div key={aidx} className="bg-red-50 dark:bg-red-900/20 p-2 rounded-xl mb-1 border border-red-100 dark:border-red-900/50">
                                 <p className="font-bold text-red-700 dark:text-red-400 text-[10px]">{area.name}</p>
                                 <p className="text-[9px] text-red-600 dark:text-red-500 italic leading-tight mt-0.5">{area.reason}</p>
+                              </div>
+                            ))}
+
+                            {/* Global Intersection Areas */}
+                            {intersectingGlobalAirspaces.map((as, asIdx) => (
+                              <div key={`global-${asIdx}`} className="bg-rose-50 dark:bg-rose-900/20 p-2 rounded-xl mb-1 border border-rose-100 dark:border-rose-900/50">
+                                <div className="flex justify-between items-center mb-0.5">
+                                  <p className="font-black text-rose-700 dark:text-rose-400 text-[10px]">{as.name}</p>
+                                  <span className="px-1 py-0.5 bg-rose-200 dark:bg-rose-800 text-[7px] font-black uppercase rounded text-rose-800 dark:text-rose-200">{as.severity}</span>
+                                </div>
+                                <p className="text-[9px] text-rose-600 dark:text-rose-500 leading-tight">{as.reason}</p>
+                                <div className="mt-1 flex items-center justify-between text-[7px] font-bold text-rose-400">
+                                  <span>{as.source}</span>
+                                  <span>{as.type}</span>
+                                </div>
                               </div>
                             ))}
                           </div>
