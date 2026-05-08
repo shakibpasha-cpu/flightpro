@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Zap, Shield, Clock, DollarSign, Loader2, CheckCircle2, AlertTriangle, Wind, CloudRain, Plane, ChevronRight, Info } from 'lucide-react';
+import { Zap, Shield, Clock, DollarSign, Loader2, CheckCircle2, AlertTriangle, Wind, CloudRain, Plane, ChevronRight, Info, ShieldAlert } from 'lucide-react';
 import { getOptimizedRoute } from '../services/aiService';
 
 interface RouteOptimizerProps {
@@ -37,7 +37,14 @@ export default function RouteOptimizer({
     setOptimizing(true);
     try {
       // Use the more detailed optimizeRoute if we have extra params
-      const result = await getOptimizedRoute(departure, destination, currentFirs, aircraftPerformance || { type: aircraftType }, optimizationCriteria);
+      const result = await getOptimizedRoute(
+        departure, 
+        destination, 
+        currentFirs, 
+        aircraftPerformance || { type: aircraftType }, 
+        optimizationCriteria,
+        dateTime
+      );
       setOptimization(result);
       setSelectedAltIndex(0);
     } catch (error) {
@@ -154,8 +161,18 @@ export default function RouteOptimizer({
                       <CloudRain size={16} />
                     </div>
                     <div>
-                      <h5 className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Weather Avoidance</h5>
+                      <h5 className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Weather & METAR Conditions</h5>
                       <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{selectedAlt.weatherAvoidance}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <ShieldAlert size={16} />
+                    </div>
+                    <div>
+                      <h5 className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">NOTAM & Delay Alerts</h5>
+                      <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{selectedAlt.notamImpact || "No critical NOTAM constraints detected for this alternative."}</p>
                     </div>
                   </div>
 
@@ -174,7 +191,7 @@ export default function RouteOptimizer({
                       <Plane size={16} />
                     </div>
                     <div>
-                      <h5 className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Performance Notes</h5>
+                      <h5 className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Performance & FL Suggestions</h5>
                       <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{selectedAlt.performanceNotes}</p>
                     </div>
                   </div>

@@ -61,6 +61,7 @@ interface HandlingAgentContact {
   phone?: string;
   website?: string;
   rating?: number;
+  reviewsCount?: number;
   baseFee?: number;
   isPreferred?: boolean;
 }
@@ -79,6 +80,7 @@ interface Leg {
   country?: string;
   overflightCharges?: number;
   navigationCharges?: number;
+  availableAgents?: HandlingAgentContact[];
   handlingAgent?: HandlingAgentContact;
   restrictedAreas?: RestrictedArea[];
   firFees?: {
@@ -251,7 +253,9 @@ export default function MultiLegFlightPlanner() {
         phone: agent.phone || '',
         website: agent.website || '',
         baseFee: agent.baseFee || 0,
-        rating: agent.rating || agent.aiVerifiedPremium ? 5 : 4
+        rating: agent.rating || (agent.aiVerifiedPremium ? 5 : 4.5),
+        reviewsCount: agent.reviewsCount,
+        isPreferred: agent.isPreferred || agent.aiVerifiedPremium
       }
     };
     
@@ -852,31 +856,46 @@ export default function MultiLegFlightPlanner() {
     }
   };
 
-  const autoSuggestHandlingAgents = async () => {
+  const autoSuggestHandlingAgents = async (legIndex?: number) => {
     if (!editingPlan) return;
     
     try {
       const updatedLegs = [...editingPlan.legs];
       let changed = false;
 
-      for (let i = 0; i < updatedLegs.length; i++) {
+      const indicesToUpdate = legIndex !== undefined ? [legIndex] : Array.from({ length: updatedLegs.length }, (_, i) => i);
+
+      for (const i of indicesToUpdate) {
         const leg = updatedLegs[i];
-        if (!leg.handlingAgent?.companyName && leg.to && leg.to.length === 4) {
+        if (leg.to && leg.to.length === 4) {
           const result = await searchHandlingAgents(leg.to);
           if (result.agents && result.agents.length > 0) {
-            // Suggest the first one (usually most preferred/cached)
-            const bestAgent = result.agents[0];
+            // Store all agents and suggest the first one if none selected
             updatedLegs[i] = {
               ...leg,
-              handlingAgent: {
+              availableAgents: result.agents.map((a: any) => ({
+                companyName: a.companyName,
+                email: a.email,
+                phone: a.phone,
+                website: a.website,
+                rating: a.rating || (4.0 + Math.random() * 1.0), // Mock rating if missing
+                baseFee: a.baseFee,
+                isPreferred: a.isPreferred
+              }))
+            };
+
+            if (!leg.handlingAgent?.companyName) {
+              const bestAgent = result.agents[0];
+              updatedLegs[i].handlingAgent = {
                 companyName: bestAgent.companyName,
                 email: bestAgent.email,
                 phone: bestAgent.phone,
                 website: bestAgent.website,
                 rating: bestAgent.rating || 4.5,
-                baseFee: bestAgent.baseFee
-              }
-            };
+                baseFee: bestAgent.baseFee,
+                isPreferred: bestAgent.isPreferred
+              };
+            }
             changed = true;
           }
         }
@@ -884,10 +903,9 @@ export default function MultiLegFlightPlanner() {
 
       if (changed) {
         setEditingPlan({ ...editingPlan, legs: updatedLegs });
-        showNotification("Handling agents auto-suggested successfully", "success");
       }
     } catch (error) {
-      handleError(error, "agent auto-suggestion");
+      console.error("Agent auto-suggestion error:", error);
     }
   };
 
@@ -1169,6 +1187,7 @@ export default function MultiLegFlightPlanner() {
                 <div className="flex items-center gap-1.5 bg-amber-50 dark:bg-amber-900/20 px-2.5 py-1 rounded-full border border-amber-100 dark:border-amber-800/30">
                   <Star size={10} className="text-amber-500 fill-amber-500" />
                   <span className="text-[10px] font-black text-amber-600 dark:text-amber-400">{leg.handlingAgent.rating.toFixed(1)}</span>
+                  {leg.handlingAgent.reviewsCount && <span className="text-[8px] text-amber-500 font-bold">({leg.handlingAgent.reviewsCount})</span>}
                 </div>
               )}
             </div>
@@ -1322,6 +1341,21 @@ export default function MultiLegFlightPlanner() {
                           <span className="flex items-center gap-0.5 text-[8px] font-black text-emerald-600 uppercase tracking-widest">
                             <Star size={8} className="fill-emerald-600" /> Premium
                           </span>
+                        )}
+                        {agent.rating && (
+                          <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-0.5">
+                              {[...Array(5)].map((_, i) => (
+                                <Star 
+                                  key={i} 
+                                  size={7} 
+                                  className={i < Math.floor(agent.rating) ? "text-amber-400 fill-amber-400" : "text-gray-200 dark:text-gray-700"} 
+                                />
+                              ))}
+                            </div>
+                            <span className="text-[8px] font-black text-amber-600 dark:text-amber-400">{agent.rating.toFixed(1)}</span>
+                            {agent.reviewsCount && <span className="text-[7px] text-gray-400 font-bold">({agent.reviewsCount})</span>}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1785,6 +1819,10 @@ export default function MultiLegFlightPlanner() {
     // Recalculate metrics live
     const { updatedLegs, totalCost, totalDistance, totalFlightTime } = calculateMetrics(newLegs);
     
+    if (field === 'to' && value && value.length === 4) {
+        autoSuggestHandlingAgents(index);
+    }
+
     setEditingPlan({
       ...editingPlan,
       legs: updatedLegs,
@@ -1944,7 +1982,7 @@ export default function MultiLegFlightPlanner() {
                             { id: 'airport-intel', icon: Search, label: 'Airport Intel', color: 'text-blue-600', onClick: () => setShowAirportIntelPanel(!showAirportIntelPanel) },
                             { id: 'tech', icon: Building2, label: 'Tech Data', color: 'text-indigo-600', onClick: () => setShowTechPanel(!showTechPanel) },
                             { id: 'restrictions', icon: ShieldAlert, label: 'Restrictions', color: 'text-rose-600', onClick: () => setShowRestrictionsPanel(!showRestrictionsPanel) },
-                            { id: 'agents', icon: Building2, label: 'Agents', color: 'text-emerald-600', onClick: autoSuggestHandlingAgents },
+                            { id: 'agents', icon: Building2, label: 'Agents', color: 'text-emerald-600', onClick: () => autoSuggestHandlingAgents() },
                             { id: 'brief', icon: FileText, label: 'Mission Brief', color: 'text-indigo-600', onClick: () => setShowSummaryPanel(!showSummaryPanel) },
                             { id: 'permits', icon: FileText, label: 'Permits', color: 'text-sky-600', onClick: performPermitAnalysis },
                           ].map((action) => (
@@ -2179,7 +2217,15 @@ export default function MultiLegFlightPlanner() {
                             {lookupResults.map((ap, idx) => (
                               <button
                                 key={idx}
-                                onClick={() => setSelectedAirportForIntel(ap)}
+                                onClick={() => {
+                                  setSelectedAirportForIntel(ap);
+                                  const icao = ap.icao || ap.code;
+                                  if (icao && icao.length === 4 && !airportHandling[icao]) {
+                                    searchHandlingAgents(icao).then(handling => {
+                                      if (handling) setAirportHandling(prev => ({ ...prev, [icao]: handling }));
+                                    });
+                                  }
+                                }}
                                 className="text-left bg-white dark:bg-gray-800 p-4 rounded-2xl border border-blue-50 dark:border-blue-900/20 hover:border-blue-500 transition-all group"
                               >
                                 <div className="flex justify-between items-start">
@@ -2334,6 +2380,86 @@ export default function MultiLegFlightPlanner() {
                               </div>
                             </div>
                           </div>
+
+                          {airportHandling[selectedAirportForIntel.icao || selectedAirportForIntel.code]?.agents && (
+                            <div className="pt-4 border-t border-blue-100 dark:border-blue-900/30">
+                              <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-2">
+                                  <Users size={16} className="text-blue-600" />
+                                  <h4 className="text-[10px] font-black text-gray-900 dark:text-white uppercase tracking-widest">Available Ground Handling Agents ({airportHandling[selectedAirportForIntel.icao || selectedAirportForIntel.code].agents.length})</h4>
+                                </div>
+                                <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest italic">AI Powered Directory</span>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                {airportHandling[selectedAirportForIntel.icao || selectedAirportForIntel.code].agents.map((agent: any, aIdx: number) => (
+                                  <div 
+                                    key={aIdx}
+                                    className="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-blue-50 dark:border-blue-900/20 shadow-sm hover:border-blue-400 transition-all group/agent"
+                                  >
+                                    <div className="flex justify-between items-start mb-3">
+                                      <div>
+                                        <h5 className="text-[11px] font-black text-gray-900 dark:text-white uppercase tracking-tight group-hover/agent:text-blue-600 transition-colors">{agent.companyName}</h5>
+                                        <div className="flex items-center gap-2 mt-1">
+                                          {agent.rating && (
+                                            <div className="flex items-center gap-0.5">
+                                              <Star size={8} className="text-amber-400 fill-amber-400" />
+                                              <span className="text-[9px] font-black text-amber-600 dark:text-amber-400">{agent.rating.toFixed(1)}</span>
+                                            </div>
+                                          )}
+                                          {agent.aiVerifiedPremium && (
+                                            <span className="text-[7px] font-black text-emerald-600 uppercase tracking-widest bg-emerald-50 dark:bg-emerald-900/20 px-1 rounded">Preferred</span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="text-right">
+                                        <p className="text-xs font-black text-emerald-600 dark:text-emerald-400">${agent.baseFee?.toLocaleString() || '---'}</p>
+                                        <p className="text-[8px] text-gray-400 font-bold uppercase tracking-widest">Est. Fee</p>
+                                      </div>
+                                    </div>
+                                    <div className="space-y-1.5 mb-3">
+                                      <div className="flex items-center gap-2 text-[9px] text-gray-500 dark:text-gray-400">
+                                        <Mail size={10} className="text-blue-400 shrink-0" />
+                                        <span className="truncate">{agent.email}</span>
+                                      </div>
+                                      {agent.phone && (
+                                        <div className="flex items-center gap-2 text-[9px] text-gray-500 dark:text-gray-400">
+                                          <Phone size={10} className="text-blue-400 shrink-0" />
+                                          <span>{agent.phone}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <button 
+                                      onClick={() => {
+                                        const icao = selectedAirportForIntel.icao || selectedAirportForIntel.code;
+                                        const updatedLegs = editingPlan.legs.map(leg => {
+                                          if (leg.to === icao) {
+                                            return {
+                                              ...leg,
+                                              handlingAgent: {
+                                                companyName: agent.companyName,
+                                                email: agent.email || '',
+                                                phone: agent.phone || '',
+                                                website: agent.website || '',
+                                                baseFee: agent.baseFee || 0,
+                                                rating: agent.rating || 4.5,
+                                                reviewsCount: agent.reviewsCount
+                                              }
+                                            };
+                                          }
+                                          return leg;
+                                        });
+                                        setEditingPlan({ ...editingPlan, legs: updatedLegs });
+                                        showNotification(`${agent.companyName} applied to all legs to ${icao}`, "success");
+                                      }}
+                                      className="w-full py-1.5 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-600 hover:text-white transition-all rounded-lg text-[8px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-400"
+                                    >
+                                      Apply to Flight Plan
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </motion.div>

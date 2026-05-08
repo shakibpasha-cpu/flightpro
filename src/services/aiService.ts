@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { safeStringify } from "../utils/safeJson";
 import { db } from "../firebase";
-import { collection, getDocs, query, where, limit, addDoc, setDoc, doc, getDocFromServer } from "firebase/firestore";
+import { collection, getDocs, query, where, limit, addDoc, setDoc, doc, getDocFromServer, updateDoc } from "firebase/firestore";
 import { handleApiError } from "./errorService";
 
 let quotaCooldownUntil = 0;
@@ -245,8 +245,8 @@ export async function getFlightRouteDetails(departure: string, destination: stri
 }
 
 
-export async function getOptimizedRoute(departure: string, destination: string, currentFirs: any[], aircraftPerformance?: any, optimizationCriteria?: string) {
-  const cacheId = `opt_${departure.toUpperCase()}_${destination.toUpperCase()}_${(optimizationCriteria || 'balanced').toLowerCase().replace(/\s+/g, '_')}`.toLowerCase();
+export async function getOptimizedRoute(departure: string, destination: string, currentFirs: any[], aircraftPerformance?: any, optimizationCriteria?: string, dateTime?: string) {
+  const cacheId = `opt_${departure.toUpperCase()}_${destination.toUpperCase()}_${(optimizationCriteria || 'balanced').toLowerCase().replace(/\s+/g, '_')}_${(dateTime || '').replace(/[^a-z0-9]/g, '_')}`.toLowerCase();
 
   // 1. Try cache first
   try {
@@ -256,8 +256,9 @@ export async function getOptimizedRoute(departure: string, destination: string, 
       const data = snapshot.data();
       const updatedAt = new Date(data.updatedAt).getTime();
       const now = Date.now();
-      // Cache for 24 hours
-      if (now - updatedAt < 86400000) {
+      // Cache for 1 hour for high-volatility weather/notams if it's near-term
+      const cacheTTL = (dateTime && (new Date(dateTime).getTime() - now < 86400000)) ? 3600000 : 21600000;
+      if (now - updatedAt < cacheTTL) {
         return data.result;
       }
     }
@@ -265,10 +266,11 @@ export async function getOptimizedRoute(departure: string, destination: string, 
     console.error('Optimization cache read error:', error);
   }
 
-  const prompt = `Analyze the flight route from ${departure} to ${destination}.
+  const prompt = `Analyze the flight route from ${departure} to ${destination} planned for ${dateTime || 'ASAP (Current Time)'}.
   Current FIRs: ${safeStringify(currentFirs)}
   Aircraft Performance: ${safeStringify(aircraftPerformance)}
   User Preferred Optimization Criteria: ${optimizationCriteria || 'balanced (consider cost, time, and fuel)'}
+  Current Date Context: ${new Date().toISOString()}
   
   🤖 AI BEHAVIOR RULES:
   - Never leave fields empty → estimate intelligently based on aviation standards.
@@ -277,26 +279,23 @@ export async function getOptimizedRoute(departure: string, destination: string, 
   - Prefer aviation-standard terminology (e.g., block time, positioning, ACMI, dry lease).
   - Keep output clean, professional, and client-ready.
  
-  🚀 ADVANCED FEATURES TO INCLUDE:
-  - Suggest alternative flight paths (e.g., Time-Optimized, Cost-Optimized, Weather-Avoidance).
-  - Analyze current weather patterns (SIGMETs, turbulence, thunderstorms, icing) along the route.
-  - Analyze FIR (Flight Information Region) overflight charges and suggest avoidance of high-cost airspaces.
-  - Analyze aircraft performance (climb rate, cruise speed, fuel flow) and suggest optimal flight levels.
-  - Detect and flag high-cost routes (e.g., expensive overflight fees, high landing fees).
-
-  CRITICAL OPTIMIZATION GOALS:
-  1. COST REDUCTION: Suggest a route that minimizes FIR overflight charges. Identify specific high-cost FIRs to avoid.
-  2. FUEL EFFICIENCY: Suggest optimal flight levels and speeds based on aircraft performance data.
-  3. SAFETY & WEATHER: Check current and forecast weather conditions along the route. Suggest rerouting to avoid severe weather.
-  4. TIME OPTIMIZATION: Suggest routes that take advantage of favorable winds (jet streams) or shorter airway segments.
+  🚀 ADVANCED OPTIMIZATION SPECIFICATIONS:
+  1. WEATHER ANALYSIS (METAR & TAF): You MUST use googleSearch to find current METAR and TAF for ${departure}, ${destination}, and key en-route alternates at the time of ${dateTime || 'now'}. 
+     - Analyze ceilings, visibility, and winds for calculating flight conditions and suggesting flight levels.
+     - Suggest rerouting if weather is below minimums or presents high risk.
+  
+  2. NOTAM INTEGRATION: You MUST search for significant NOTAMs for ${departure}, ${destination}, and en-route FIRs valid for ${dateTime || 'now'}.
+     - Identify runway closures, equipment outages, or airspace restrictions that might cause delays.
+  
+  3. PERFORMANCE & FLIGHT LEVELS: Based on aircraft performance and en-route winds (Jet Streams), suggest optimal flight levels (FL) to maximize efficiency.
   
   Provide:
   - Multiple alternative flight paths (at least 2).
   - For each alternative:
     - List of FIRs (name, country, overflightCharge, navigationCharge).
     - Routing changes (e.g., "Via L602 instead of M747").
-    - Weather avoidance notes.
-    - FIR optimization notes.
+    - Weather avoidance notes (Include METAR/TAF summary).
+    - NOTAM alerts & operational impacts (Delay detection).
     - Performance notes (optimal FL, speed).
     - Estimated total cost and time.
     - Total savings compared to the primary route.
@@ -305,10 +304,11 @@ export async function getOptimizedRoute(departure: string, destination: string, 
   Return the result as a JSON object: { 
     "alternatives": [
       {
-        "name": string, // e.g. "Cost Optimized", "Time Optimized", "Weather Avoidance"
+        "name": string, 
         "firs": { "name": string, "country": string, "rules": string, "overflightCharge": number, "navigationCharge": number }[], 
         "routingChanges": string,
         "weatherAvoidance": string,
+        "notamImpact": string,
         "firOptimization": string,
         "performanceNotes": string,
         "totalCost": number,
@@ -572,11 +572,10 @@ export async function optimizeRoute(params: {
   - Keep output clean, professional, and client-ready.
 
   🚀 OPTIMIZATION CRITERIA:
-  1. REAL-TIME WEATHER: Analyze current and forecast weather (SIGMETs, turbulence, thunderstorms, wind components). Suggest routing to avoid hazardous weather.
-  2. FIR CHARGES: Analyze overflight and navigation charges for all FIRs crossed. Suggest alternative routings to avoid high-cost FIRs if the distance trade-off is beneficial.
-  3. AIRCRAFT PERFORMANCE: Analyze the specific performance characteristics of the ${params.aircraftType || 'selected aircraft'} (climb rate, cruise speed at different altitudes, fuel flow). Suggest optimal flight levels.
-  4. EMPTY LEG OPPORTUNITIES: Identify potential empty leg matches that could reduce positioning costs.
-  5. OPERATIONAL EFFICIENCY: Recommend optimal departure timing to avoid airport congestion or peak-hour fees.
+  1. REAL-TIME METAR/TAF: You MUST use googleSearch to find current METAR and TAF data for ${params.departure} and ${params.destination}. Analyze ceilings, visibility, and winds (tailwinds/headwinds) for optimal flight conditions and levels.
+  2. NOTAM IMPACT: Search for significant NOTAMs along the route. Identify potential delays, airport closures, or equipment outages (e.g., ILS outages) that impact the mission.
+  3. FIR CHARGES: Analyze overflight and navigation charges for all FIRs crossed. Suggest alternative routings to avoid high-cost FIRs if beneficial.
+  4. AIRCRAFT PERFORMANCE: Analyze the specific performance characteristics of the ${params.aircraftType || 'selected aircraft'} and suggest optimal flight levels based on weight and weather.
 
   Return a JSON object:
   {
@@ -594,9 +593,10 @@ export async function optimizeRoute(params: {
         "estimatedCost": number,
         "fuelBurnKg": number,
         "routingChanges": "string",
-        "weatherAvoidance": "string",
+        "weatherAvoidance": "string (Include METAR/TAF summary)",
+        "notamImpact": "string (Include NOTAM impact & delay alerts)",
         "firOptimization": "string",
-        "performanceNotes": "string",
+        "performanceNotes": "string (Include FL suggestions)",
         "totalSavings": number,
         "profitabilityMetrics": {
           "brokerProfit": number,
@@ -607,6 +607,7 @@ export async function optimizeRoute(params: {
       }
     ],
     "weatherAlerts": { "severity": "Low" | "Medium" | "High", "description": "string", "impact": "string" }[],
+    "notams": { "id": "string", "location": "string", "impact": "string", "severity": "Low" | "Medium" | "High" }[],
     "summary": "string"
   }`;
 
@@ -1868,25 +1869,47 @@ export async function getAirportDetails(code: string, forceRefresh: boolean = fa
       const q = query(airportsRef, where('icao', '==', code.toUpperCase()));
       const snapshot = await getDocs(q);
       if (!snapshot.empty) {
-        return snapshot.docs[0].data();
+        const data = snapshot.docs[0].data();
+        // If data is significantly incomplete, proceed to AI lookup instead of returning cached data
+        const isMissingCriticalData = !data.city || data.city === 'Unknown' || !data.country || data.country === 'Unknown';
+        
+        if (!isMissingCriticalData) {
+          return data;
+        }
       }
     } catch (cacheError) {
       console.error('Cache read error in getAirportDetails:', cacheError);
     }
   }
   const prompt = `Provide precise technical information for the airport: ${code}. 
-  Use Google Search to verify the latest runway data, elevation, and operating hours.
+  Use Google Search to verify the latest runway data, elevation, country, and operating hours.
+  
+  SEARCH TASKS:
+  1. Retrieve latest METAR and TAF (weather) if available.
+  2. Search for any critical active NOTAMs (Notice to Airmen).
+  3. Get current fuel prices (Jet A-1 and Avgas 100LL) if available.
   
   Required fields:
   - Latitude/Longitude (accurate decimal).
   - Timezone (IANA timezone ID, e.g., Europe/London or America/New_York).
+  - City (Full city name).
+  - Country (Full country name).
   - Runway length (longest runway in feet).
   - Elevation (in feet).
   - Operating hours (local time or H24).
   - Fuel (list specific grades like Jet A-1, Avgas 100LL).
+  - Fuel Prices (Current rates per USG or Litre - specify currency).
   - Customs & Immigration (Is it an Airport of Entry? What are the requirements?).
   - Ground Handling (Are FBOs available? List major agencies if possible).
-  - Technical frequencies (ATIS, Tower, Ground, Delivery) if available.`;
+  - Technical frequencies (ATIS, Tower, Ground, Delivery) if available.
+  - Live METAR/TAF (Encoded or decoded).
+  - Critical NOTAMs summary.
+
+  Ensure City and Country are NEVER empty or 'Unknown'. 
+  - For Pakistan (OP), ensure Country is 'Pakistan'. 
+  - For UAE (OM), ensure Country is 'United Arab Emirates'.
+  - For UK (EG), ensure Country is 'United Kingdom'.
+  Always resolve the full country name from the ICAO prefix if search results are unclear. If you cannot find the specific city, use the most prominent nearby city or name of the province.`;
   
   try {
     const ai = getAI();
@@ -1904,11 +1927,23 @@ export async function getAirportDetails(code: string, forceRefresh: boolean = fa
             lng: { type: Type.NUMBER },
             name: { type: Type.STRING },
             city: { type: Type.STRING },
+            country: { type: Type.STRING },
             timezone: { type: Type.STRING },
             runwayLength: { type: Type.NUMBER },
             elevation: { type: Type.NUMBER },
             operatingHours: { type: Type.STRING },
             fuelTypes: { type: Type.ARRAY, items: { type: Type.STRING } },
+            fuelPrices: { 
+              type: Type.ARRAY, 
+              items: { 
+                type: Type.OBJECT,
+                properties: {
+                  grade: { type: Type.STRING },
+                  price: { type: Type.STRING },
+                  unit: { type: Type.STRING }
+                }
+              } 
+            },
             handlingAvailable: { type: Type.BOOLEAN },
             handlingDescription: { type: Type.STRING },
             customsAvailable: { type: Type.BOOLEAN },
@@ -1916,7 +1951,10 @@ export async function getAirportDetails(code: string, forceRefresh: boolean = fa
             isAirportOfEntry: { type: Type.BOOLEAN },
             atisFrequency: { type: Type.STRING },
             towerFrequency: { type: Type.STRING },
-            groundFrequency: { type: Type.STRING }
+            groundFrequency: { type: Type.STRING },
+            metar: { type: Type.STRING },
+            taf: { type: Type.STRING },
+            notams: { type: Type.ARRAY, items: { type: Type.STRING } }
           }
         },
         tools: [{ googleSearch: {} }],
@@ -1931,7 +1969,16 @@ export async function getAirportDetails(code: string, forceRefresh: boolean = fa
       const q = query(airportsRef, where('icao', '==', details.icao.toUpperCase()));
       const snapshot = await getDocs(q);
       
-      if (snapshot.empty) {
+      if (!snapshot.empty) {
+        // Update existing airport record to enrich it with new fields (like country)
+        const docRef = snapshot.docs[0].ref;
+        await updateDoc(docRef, {
+          ...details,
+          icao: details.icao.toUpperCase(),
+          iata: details.iata?.toUpperCase() || '',
+          updatedAt: new Date().toISOString()
+        });
+      } else {
         // Add new airport to database
         await addDoc(airportsRef, {
           ...details,
@@ -2305,6 +2352,7 @@ export async function searchHandlingAgents(icao: string, airportName?: string, c
   DISCOUNTS AND PREMIUM RATINGS:
   - If the agent is known for competitive pricing, bulk discounts, or partner network discounts, set 'discount' to true and potentially summarize it in 'discountDetails'.
   - If the agent is highly rated, has 5-star reviews, or is known for premium/VIP service, set 'aiVerifiedPremium' to true.
+  - Return the real 'rating' (1.0-5.0) and 'reviewsCount' based on search results (Google Reviews, Trustpilot, or directory ratings).
   Prioritize these specialized and high-quality agents in your results!`;
 
   try {
@@ -2330,7 +2378,9 @@ export async function searchHandlingAgents(icao: string, airportName?: string, c
                   additionalServices: { type: Type.STRING },
                   discount: { type: Type.BOOLEAN },
                   discountDetails: { type: Type.STRING },
-                  aiVerifiedPremium: { type: Type.BOOLEAN }
+                  aiVerifiedPremium: { type: Type.BOOLEAN },
+                  rating: { type: Type.NUMBER },
+                  reviewsCount: { type: Type.NUMBER }
                 },
                 required: ["companyName", "email"]
               }

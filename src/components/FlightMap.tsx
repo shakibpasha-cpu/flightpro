@@ -149,6 +149,15 @@ interface HandlingAgent {
   additionalServices?: string;
 }
 
+interface PointOfInterest {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  lat: number;
+  lng: number;
+}
+
 interface Leg {
   departure: string;
   destination: string;
@@ -241,17 +250,21 @@ interface FlightMapProps {
   isLoading?: boolean;
 }
 
-function MapEvents({ onMapClick, onMouseMove, isDrawing, drawingPoints, setDrawingPoints }: { 
+function MapEvents({ onMapClick, onMouseMove, isDrawing, drawingPoints, setDrawingPoints, isAddingPOI, onAddPOI }: { 
   onMapClick?: (lat: number, lng: number) => void, 
   onMouseMove?: (lat: number, lng: number) => void,
   isDrawing?: boolean,
   drawingPoints?: [number, number][],
-  setDrawingPoints?: (points: [number, number][]) => void
+  setDrawingPoints?: (points: [number, number][]) => void,
+  isAddingPOI?: boolean,
+  onAddPOI?: (lat: number, lng: number) => void
 }) {
   useMapEvents({
     click(e) {
       if (isDrawing && setDrawingPoints && drawingPoints) {
         setDrawingPoints([...drawingPoints, [e.latlng.lat, e.latlng.lng]]);
+      } else if (isAddingPOI && onAddPOI) {
+        onAddPOI(e.latlng.lat, e.latlng.lng);
       } else if (onMapClick) {
         onMapClick(e.latlng.lat, e.latlng.lng);
       }
@@ -351,6 +364,11 @@ export default function FlightMap({
   const [showWeather, setShowWeather] = useState(true);
   const [showRisks, setShowRisks] = useState(true);
   const [isDrawingRestrictedArea, setIsDrawingRestrictedArea] = useState(false);
+  const [isAddingPOI, setIsAddingPOI] = useState(false);
+  const [pois, setPois] = useState<PointOfInterest[]>([]);
+  const [newPOIName, setNewPOIName] = useState('');
+  const [newPOICategory, setNewPOICategory] = useState('Safety');
+  const [newPOIDesc, setNewPOIDesc] = useState('');
   const [drawingPoints, setDrawingPoints] = useState<[number, number][]>([]);
   const [newAreaName, setNewAreaName] = useState('');
   const [newAreaReason, setNewAreaReason] = useState('');
@@ -1219,20 +1237,39 @@ export default function FlightMap({
 
           <button 
             onClick={() => {
+              setIsAddingPOI(!isAddingPOI);
+              if (!isAddingPOI) {
+                setIsDrawingRestrictedArea(false);
+              }
+            }}
+            className={`p-3 rounded-2xl shadow-xl border transition-all flex items-center gap-2 font-black text-xs uppercase tracking-widest ${
+              isAddingPOI 
+                ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg' 
+                : 'bg-white dark:bg-gray-800 text-emerald-600 dark:text-emerald-400 border-gray-100 dark:border-gray-700'
+            }`}
+            title="Add Point of Interest"
+          >
+            <MapIcon size={18} />
+            <span>{isAddingPOI ? 'Marking POI' : 'Add POI'}</span>
+          </button>
+
+          <button 
+            onClick={() => {
               setIsDrawingRestrictedArea(!isDrawingRestrictedArea);
-              setDrawingPoints([]);
-              setNewAreaName('');
-              setNewAreaReason('');
+              if (!isDrawingRestrictedArea) {
+                setDrawingPoints([]);
+                setIsAddingPOI(false);
+              }
             }}
             className={`p-3 rounded-2xl shadow-xl border transition-all flex items-center gap-2 font-black text-xs uppercase tracking-widest ${
               isDrawingRestrictedArea 
-                ? 'bg-indigo-600 text-white border-indigo-600' 
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg' 
                 : 'bg-white dark:bg-gray-800 text-indigo-600 dark:text-indigo-400 border-gray-100 dark:border-gray-700'
             }`}
             title="Draw Restricted Area"
           >
             <Plus size={18} />
-            <span>Draw Area</span>
+            <span>{isDrawingRestrictedArea ? 'Drawing Area' : 'Draw Area'}</span>
           </button>
         </div>
 
@@ -1387,6 +1424,67 @@ export default function FlightMap({
 
       {/* Detailed Leg Information Side Panel */}
       {/* Drawing Controls Overlay (when no sidebar is open) */}
+      <AnimatePresence>
+        {isAddingPOI && (
+          <motion.div
+            initial={{ y: 50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 50, opacity: 0 }}
+            className="absolute bottom-10 left-1/2 -translate-x-1/2 z-[1200] max-w-sm w-full pointer-events-auto"
+          >
+            <div className="p-4 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-emerald-100 dark:border-emerald-800 shadow-2xl rounded-3xl space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">POI MARKER MODE</p>
+                <button onClick={() => setIsAddingPOI(false)} className="text-gray-400 hover:text-red-500">
+                  <X size={16} />
+                </button>
+              </div>
+              <p className="text-[8px] text-gray-500 dark:text-gray-400 font-bold">1. Enter details below. 2. Click on the map to place the marker.</p>
+              
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest px-1">Location Name</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. Navigation Aid, Obstacle, HQ"
+                    value={newPOIName}
+                    onChange={(e) => setNewPOIName(e.target.value)}
+                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl px-3 py-2 text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest px-1">Category</label>
+                  <div className="flex gap-2">
+                    {['Safety', 'Operational', 'Alternative', 'Fuel'].map((cat) => (
+                      <button
+                        key={cat}
+                        onClick={() => setNewPOICategory(cat)}
+                        className={`flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest border transition-all ${
+                          newPOICategory === cat 
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg' 
+                            : 'bg-white dark:bg-gray-800 text-gray-400 border-gray-100 dark:border-gray-700 hover:border-emerald-200'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest px-1">Tactical Notes</label>
+                  <textarea 
+                    placeholder="Describe relevance to flight operations..."
+                    value={newPOIDesc}
+                    onChange={(e) => setNewPOIDesc(e.target.value)}
+                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl px-3 py-2 text-xs font-bold h-16 resize-none outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {isDrawingRestrictedArea && selectedLegIndex === null && (
           <motion.div
@@ -1901,6 +1999,25 @@ export default function FlightMap({
           isDrawing={isDrawingRestrictedArea}
           drawingPoints={drawingPoints}
           setDrawingPoints={setDrawingPoints}
+          isAddingPOI={isAddingPOI}
+          onAddPOI={(lat, lng) => {
+            if (!newPOIName) {
+              alert('Please enter a location name for the POI first.');
+              return;
+            }
+            const poi: PointOfInterest = {
+              id: Math.random().toString(36).substr(2, 9),
+              name: newPOIName,
+              category: newPOICategory,
+              description: newPOIDesc,
+              lat,
+              lng
+            };
+            setPois(prev => [...prev, poi]);
+            setIsAddingPOI(false);
+            setNewPOIName('');
+            setNewPOIDesc('');
+          }}
         />
         <MapController coords={allCoords} />
         <ScaleControl position="bottomleft" />
@@ -2131,6 +2248,62 @@ export default function FlightMap({
                 <p className="text-[10px] font-bold text-gray-700">{r.description}</p>
                 <div className="mt-1 px-1.5 py-0.5 bg-red-100 text-red-700 text-[8px] font-black uppercase rounded inline-block">
                   {r.severity} Severity
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+
+        {/* Custom POI Markers */}
+        {pois.map(poi => (
+          <Marker 
+            key={poi.id} 
+            position={[poi.lat, poi.lng]}
+            icon={L.divIcon({
+              className: 'poi-icon',
+              html: `
+                <div class="flex flex-col items-center group">
+                  <div class="p-1.5 rounded-lg bg-emerald-600 text-white shadow-lg shadow-emerald-500/30 transform transition-transform group-hover:scale-110">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>
+                    </svg>
+                  </div>
+                  <div class="mt-1 px-2 py-0.5 bg-white/90 dark:bg-gray-800/90 rounded text-[8px] font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest shadow-sm border border-emerald-100 dark:border-emerald-800 whitespace-nowrap">
+                    ${poi.name}
+                  </div>
+                </div>
+              `,
+              iconSize: [40, 40],
+              iconAnchor: [20, 32]
+            })}
+          >
+            <Popup className="dark-popup">
+              <div className="p-3 min-w-[180px]">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1 bg-emerald-100 text-emerald-600 rounded">
+                      <GripVertical size={12} />
+                    </span>
+                    <h4 className="text-[10px] font-black text-gray-900 dark:text-white uppercase tracking-widest">{poi.name}</h4>
+                  </div>
+                  <button 
+                    onClick={() => setPois(pois.filter(p => p.id !== poi.id))}
+                    className="text-gray-400 hover:text-red-500 p-1"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+                <div className="px-2 py-0.5 bg-emerald-50 text-emerald-600 text-[8px] font-black uppercase rounded inline-block mb-2">
+                  {poi.category}
+                </div>
+                {poi.description && (
+                  <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-relaxed italic border-t border-gray-100 dark:border-gray-800 pt-2 mt-2">
+                    "{poi.description}"
+                  </p>
+                )}
+                <div className="mt-3 flex items-center justify-between text-[8px] font-bold text-gray-400 uppercase">
+                  <span>LAT: {poi.lat.toFixed(4)}</span>
+                  <span>LNG: {poi.lng.toFixed(4)}</span>
                 </div>
               </div>
             </Popup>
