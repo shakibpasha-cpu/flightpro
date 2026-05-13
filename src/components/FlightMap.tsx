@@ -248,6 +248,8 @@ interface FlightMapProps {
   safetyData?: SafetyData;
   hoveredLegIndex?: number | null;
   isLoading?: boolean;
+  forceDrawingMode?: boolean;
+  onDrawingModeChange?: (isDrawing: boolean) => void;
 }
 
 function MapEvents({ onMapClick, onMouseMove, isDrawing, drawingPoints, setDrawingPoints, isAddingPOI, onAddPOI }: { 
@@ -346,7 +348,9 @@ export default function FlightMap({
   optimizedRoute,
   safetyData,
   hoveredLegIndex,
-  isLoading
+  isLoading,
+  forceDrawingMode,
+  onDrawingModeChange
 }: FlightMapProps) {
   const [previewCoords, setPreviewCoords] = useState<{ code: string, lat: number, lng: number }[]>([]);
   const [lastClicked, setLastClicked] = useState<{ lat: number, lng: number } | null>(null);
@@ -364,6 +368,21 @@ export default function FlightMap({
   const [showWeather, setShowWeather] = useState(true);
   const [showRisks, setShowRisks] = useState(true);
   const [isDrawingRestrictedArea, setIsDrawingRestrictedArea] = useState(false);
+
+  useEffect(() => {
+    onDrawingModeChange?.(isDrawingRestrictedArea);
+  }, [isDrawingRestrictedArea, onDrawingModeChange]);
+
+  useEffect(() => {
+    if (forceDrawingMode !== undefined) {
+      setIsDrawingRestrictedArea(forceDrawingMode);
+      if (forceDrawingMode) {
+        setDrawingPoints([]);
+        setNewAreaName('');
+        setNewAreaReason('');
+      }
+    }
+  }, [forceDrawingMode]);
   const [isAddingPOI, setIsAddingPOI] = useState(false);
   const [pois, setPois] = useState<PointOfInterest[]>([]);
   const [newPOIName, setNewPOIName] = useState('');
@@ -1375,25 +1394,55 @@ export default function FlightMap({
         )}
 
         {showChartSelector && (
-          <div className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-md p-2 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 w-56 animate-in slide-in-from-top-2 duration-200">
-            <div className="space-y-1">
-              {Object.values(CHART_LAYERS).map((chart) => (
-                <button
-                  key={chart.id}
-                  onClick={() => {
-                    setActiveChart(chart.id);
-                    setShowChartSelector(false);
-                  }}
-                  className={`w-full text-left px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-between ${
-                    activeChart === chart.id 
-                      ? 'bg-indigo-600 text-white shadow-lg' 
-                      : 'text-gray-500 dark:text-gray-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 hover:text-indigo-600 dark:hover:text-indigo-400'
-                  }`}
-                >
-                  <span>{chart.name}</span>
-                  {activeChart === chart.id && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
-                </button>
-              ))}
+          <div className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-md p-3 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-800 w-64 animate-in slide-in-from-top-2 duration-200">
+            <div className="space-y-4">
+              <div>
+                <p className="text-[8px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em] mb-2 px-2">Base Layers</p>
+                <div className="space-y-1">
+                  {Object.values(CHART_LAYERS).filter(c => c.id === 'standard').map((chart) => (
+                    <button
+                      key={chart.id}
+                      onClick={() => {
+                        setActiveChart(chart.id);
+                        setShowChartSelector(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-between ${
+                        activeChart === chart.id 
+                          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' 
+                          : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-indigo-600 dark:hover:text-indigo-400'
+                      }`}
+                    >
+                      <span>{chart.name}</span>
+                      {activeChart === chart.id && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-[8px] font-black text-indigo-500 dark:text-indigo-400 uppercase tracking-[0.2em] mb-2 px-2 flex items-center gap-1.5">
+                  <Plane size={10} /> Aeronautical Charts
+                </p>
+                <div className="space-y-1">
+                  {Object.values(CHART_LAYERS).filter(c => c.id !== 'standard').map((chart) => (
+                    <button
+                      key={chart.id}
+                      onClick={() => {
+                        setActiveChart(chart.id);
+                        setShowChartSelector(false);
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-between ${
+                        activeChart === chart.id 
+                          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' 
+                          : 'text-gray-500 dark:text-gray-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 hover:text-indigo-600 dark:hover:text-indigo-400'
+                      }`}
+                    >
+                      <span>{chart.name}</span>
+                      {activeChart === chart.id && <div className="w-1.5 h-1.5 bg-white rounded-full shadow-sm" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
             <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700 px-2 space-y-2">
               <div className="flex items-center justify-between">

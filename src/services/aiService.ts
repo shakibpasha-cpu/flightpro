@@ -298,7 +298,8 @@ export async function getOptimizedRoute(departure: string, destination: string, 
     - NOTAM alerts & operational impacts (Delay detection).
     - Performance notes (optimal FL, speed).
     - Estimated total cost and time.
-    - Total savings compared to the primary route.
+    - Estimated fuel burn (kg/lbs) and fuel savings percentage compared to the primary route.
+    - Detailed reasoning for "minor detours" if they optimize efficiency (e.g., "Slightly south detour to catch 80kt tailwind").
   - A final recommendation on which route to choose and why.
   
   Return the result as a JSON object: { 
@@ -311,6 +312,9 @@ export async function getOptimizedRoute(departure: string, destination: string, 
         "notamImpact": string,
         "firOptimization": string,
         "performanceNotes": string,
+        "fuelBurn": number,
+        "fuelSavingsPercent": number,
+        "detourLogic": string,
         "totalCost": number,
         "totalTime": string,
         "totalSavings": number,
@@ -1532,6 +1536,162 @@ export async function getMultiLegRouteDetails(airports: string[]) {
     }
     handleAiError(error, 'getMultiLegRouteDetails');
     return null;
+  }
+}
+
+export async function getMROProvidersForAirport(airportIcao: string) {
+  const capabilities_list = [
+    'Line Maintenance',
+    'Base Maintenance',
+    'A-Check',
+    'B-Check',
+    'C-Check',
+    'D-Check',
+    'Engine Overhaul',
+    'Avionics',
+    'Interior Refurbishment',
+    'Component Repair',
+    'Engineering Services',
+    'Non-Destructive Testing (NDT)',
+    'Composite Repair',
+    'Painting/Liveries'
+  ];
+
+  const prompt = `Research and identify the top 5 REAL-WORLD Aircraft maintenance, repair, and overhaul (MRO) service providers at or serving ${airportIcao}.
+  
+  For each provider, find:
+  - Full company name
+  - Headquarters location
+  - Exact capabilities: You MUST map the provider's services ONLY to one or more items from this standardized list: ${capabilities_list.join(', ')}.
+  - Key certifications (e.g., EASA Part 145, FAA Part 145)
+  - Supported aircraft families (e.g., A320, B737, G650)
+  - Contact email, phone number, and official website
+  
+  Return a JSON array of objects:
+  [
+    {
+      "name": "string",
+      "headquarters": "string",
+      "airports": ["${airportIcao}"],
+      "capabilities": ["string"],
+      "certifications": ["string"],
+      "aircraftTypes": ["string"],
+      "contactEmail": "string",
+      "phone": "string",
+      "website": "string",
+      "rating": number (1-5),
+      "ai_verified": true
+    }
+  ]
+  
+  Only suggest REAL, current providers found via search.`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'getMROProvidersForAirport');
+    return [];
+  }
+}
+
+export async function getCateringProvidersForAirport(airportIcao: string) {
+  const prompt = `Research and identify the top 5 REAL-WORLD in-flight catering service providers at or serving ${airportIcao}.
+  
+  For each provider, find:
+  - Full company name
+  - Headquarters location
+  - Exact capabilities (e.g., Economy, Business, First Class, VIP, Halal, Kosher)
+  - Key certifications (e.g., HACCP, Halal Certified, ISO 22000)
+  - Supported aircraft types (e.g., Narrowbody, Widebody, Business Jets)
+  - Contact email, phone, and official website
+  - Estimated catering fee average (number in USD)
+  
+  Return a JSON array of objects:
+  [
+    {
+      "name": "string",
+      "headquarters": "string",
+      "airports": ["${airportIcao}"],
+      "capabilities": ["string"],
+      "certifications": ["string"],
+      "aircraftTypes": ["string"],
+      "contactEmail": "string",
+      "phone": "string",
+      "website": "string",
+      "rating": number (1-5),
+      "cateringFee": number,
+      "ai_verified": true
+    }
+  ]
+  
+  Only suggest REAL, current providers found via search.`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'getCateringProvidersForAirport');
+    return [];
+  }
+}
+
+export async function getFuelProvidersForAirport(airportIcao: string) {
+  const prompt = `Research and identify REAL aviation fuel service providers (FBOs or specialized fuel companies) at or serving ${airportIcao}.
+  Include major global networks like Shell Aviation, Air BP, World Fuel Services, TotalEnergies, or local airport fuel farms and FBOs like Signature, Jet Aviation, ExecuJet.
+  
+  Return a JSON array of objects: 
+  [
+    { 
+      "name": "string", 
+      "airports": ["${airportIcao}"], 
+      "fuelTypes": ["Jet A-1", "Avgas 100LL"],
+      "services": ["Into-plane fueling", "Defueling"],
+      "headquarters": "string",
+      "contactEmail": "string", 
+      "phone": "string", 
+      "website": "string",
+      "rating": number (1-5),
+      "providerType": "FBO" | "Fuel Company" | "Airport Authority",
+      "ai_verified": true
+    }
+  ]
+  
+  Only suggest REAL, current providers found via search.`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }]
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'getFuelProvidersForAirport');
+    return [];
   }
 }
 
@@ -3241,8 +3401,19 @@ export async function getDetailedPDFReportData(departure: string, destination: s
       "airportFees": string, "handling": string, "parking": string, 
       "crewDuty": string, "positioning": string, "insurance": string, 
       "catering": string, "profitMargin": string
-    }
+    },
+    "mroSuggestions": [
+      { "name": string, "airport": string, "capabilities": string[], "rating": number }
+    ],
+    "cateringSuggestions": [
+      { "name": string, "airport": string, "capabilities": string[], "rating": number }
+    ],
+    "fuelSuggestions": [
+      { "name": string, "airport": string, "providerType": string, "rating": number }
+    ]
   }
+  
+  Identify 2-3 REAL MRO, Catering, and Fuel Service providers at or near ${departure} and ${destination}. Fuel providers should include major brands like Shell, BP, Air BP, World Fuel Services, or local airport fuel farms.
   
   Do not include markdown or text outside JSON. Use google search to verify data.`;
 
@@ -3260,6 +3431,343 @@ export async function getDetailedPDFReportData(departure: string, destination: s
     return JSON.parse(response.text);
   } catch (error) {
     console.error('getDetailedPDFReportData error:', error);
+    return null;
+  }
+}
+
+export async function standardizeMROCapabilities(currentCapabilities: string[]) {
+  const capabilities_list = [
+    'Line Maintenance',
+    'Base Maintenance',
+    'A-Check',
+    'B-Check',
+    'C-Check',
+    'D-Check',
+    'Engine Overhaul',
+    'Avionics',
+    'Interior Refurbishment',
+    'Component Repair',
+    'Engineering Services',
+    'Non-Destructive Testing (NDT)',
+    'Composite Repair',
+    'Painting/Liveries',
+    'Structural Repair'
+  ];
+
+  const prompt = `Standardize the following Aircraft MRO (Maintenance, Repair, and Overhaul) capabilities by mapping them to this predefined list:
+  Predefined List: ${capabilities_list.join(', ')}
+  
+  Current Capabilities to process: ${currentCapabilities.join(', ')}
+  
+  TASK:
+  1. Map each current capability to the closest match in the predefined list.
+  2. If a current capability has NO clear match in the predefined list, do NOT invent a match. Instead, list it in a "unmapped" array.
+  3. Return only the unique items from the predefined list that were matched.
+  
+  Return a JSON object:
+  {
+    "mapped": ["string"],
+    "unmapped": ["string"],
+    "review_needed": boolean (true if there are any unmapped items)
+  }`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'standardizeMROCapabilities');
+    return { mapped: currentCapabilities, unmapped: [], review_needed: false };
+  }
+}
+
+export async function standardizeAircraftTypes(currentTypes: string[]) {
+  const common_types = [
+    'A320', 'A321', 'A330', 'A350', 'A380',
+    'B737', 'B747', 'B757', 'B767', 'B777', 'B787',
+    'G650', 'G550', 'G600', 'G700', 'G800',
+    'Global 6000', 'Global 7500', 'Global 5500',
+    'Challenger 350', 'Challenger 650',
+    'Phenom 300', 'Phenom 100',
+    'Citation Latitude', 'Citation Longitude',
+    'PC-12', 'PC-24',
+    'King Air 350', 'Falcon 8X', 'Falcon 900'
+  ];
+
+  const prompt = `Standardize the following Aircraft types by mapping them to their primary model family (e.g., "Airbus A320-200" to "A320", "Boeing 737-800" to "B737").
+  
+  Predefined Common List (use as reference): ${common_types.join(', ')}
+  
+  Current Types to process: ${currentTypes.join(', ')}
+  
+  TASK:
+  1. Map each current type to a standardized, clean model identifier.
+  2. If a type is ambiguous, poorly formatted, or redundant, list it in the "unmapped" array and set "review_needed" to true.
+  3. Return a clean mapping of original type to standardized type.
+  
+  Return a JSON object:
+  {
+    "mappings": { "original_type": "standardized_type" },
+    "unmapped": ["string"],
+    "review_needed": boolean
+  }`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'standardizeAircraftTypes');
+    return { mappings: {}, unmapped: [], review_needed: false };
+  }
+}
+export async function getOptimizedRouteSuggestions(departure: string, destination: string, aircraftType: string, missionParams: any) {
+  const prompt = `You are an expert Flight Dispatcher and Route Optimizer. 
+  Analyze a flight mission from ${departure} to ${destination} using a ${aircraftType}.
+  
+  CONTEXT:
+  - Mission: ${JSON.stringify(missionParams)}
+  - Target: Optimize for TOTAL FUEL EFFICIENCY and COST.
+  
+  CONSIDER:
+  1. Weather Patterns: Recent high-altitude winds (jet streams) on this route.
+  2. FIR Charges: Overflight fees for different countries (e.g., avoiding expensive FIRs if a minor detour saves more than the extra fuel cost).
+  3. Aircraft Performance: Optimal cruising altitudes and step-climbs for ${aircraftType}.
+  
+  TASK:
+  Provide 2 alternative route strategies.
+  
+  Return a JSON object:
+  {
+    "suggestions": [
+      {
+        "strategyName": "string (e.g., Wind-Rider Path, FIR-Avoidance)",
+        "description": "string",
+        "estimatedFuelSavingPercent": number,
+        "estimatedTimeChangeMinutes": number,
+        "costImpact": "string",
+        "waypoints": ["string"],
+        "reasoning": "string"
+      }
+    ],
+    "environmentalImpact": "string"
+  }
+  
+  Use REAL geographic and meteorological logic. Do not include markdown.`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }]
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'getOptimizedRouteSuggestions');
+    return { suggestions: [], environmentalImpact: "Unable to calculate environmental impact at this time." };
+  }
+}
+
+export async function getMROCertifications(providerName: string, location?: string) {
+  const certifications_list = [
+    'EASA Part 145',
+    'FAA Part 145',
+    'ISO 9001',
+    'AS9110',
+    'AS9120',
+    'CAA (UK) Part 145',
+    'Transport Canada TCCA',
+    'JCAB (Japan)',
+    'CAAC (China)'
+  ];
+
+  const prompt = `Research and identify the official aviation maintenance certifications held by the MRO provider "${providerName}" ${location ? `based in ${location}` : ''}.
+  
+  TASK:
+  1. Find ALL real-world certifications from their official website or regulatory databases.
+  2. Map them to this standardized list if they match: ${certifications_list.join(', ')}.
+  3. Also include any OTHER significant aviation certifications (e.g., specific country CAA approvals).
+  
+  Return a JSON object:
+  {
+    "mapped": ["string"],
+    "others": ["string"]
+  }
+  
+  Only include certifications that are CURRENTLY active and verifiable. If none are found, return empty arrays.`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'getMROCertifications');
+    return { mapped: [], others: [] };
+  }
+}
+
+export async function getPermitServiceProviders(region?: string) {
+  const prompt = `Research and identify the top 10 REAL-WORLD companies that specialize in obtaining landing and overfly permits from Civil Aviation Authorities (CAAs) worldwide.
+  ${region ? `Prioritize companies with strong roots or presence in ${region}.` : ''}
+  
+  For each company, identify:
+  - Official Company Name
+  - Headquarters location
+  - Key regions of expertise (e.g., Africa, Middle East, Europe, South America)
+  - Type of service: "Permit Specialist", "Full-Service Handling (Trip Support)", "Technology/Software Provider"
+  - Supported services: "Overfly Permits", "Landing Permits", "Slots Management", "Flight Planning", "Ground Handling Coordination"
+  - Contact details (Email, Phone, Official Website)
+  - Rating based on market reputation (1-5)
+  
+  Return a JSON array of objects:
+  [
+    {
+      "name": "string",
+      "headquarters": "string",
+      "regions": ["string"],
+      "serviceType": "string",
+      "services": ["string"],
+      "contactEmail": "string",
+      "phone": "string",
+      "website": "string",
+      "rating": number,
+      "ai_verified": true
+    }
+  ]
+  
+  Only include REAL, currently operating trip support and permit agencies.`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'getPermitServiceProviders');
+    return [];
+  }
+}
+
+export async function scrapePermitProviders(query: string, urlHint?: string) {
+  const prompt = `Act as an Aviation Intelligence Scraper. Research and identify permit service providers (landing/overfly permits) based on the following query: "${query}"
+  ${urlHint ? `Specifically analyze the company or information available at or related to: ${urlHint}` : ''}
+  
+  For each identified provider, extract:
+  - Official Company Name
+  - Headquarters location
+  - Key regions of expertise (e.g., Africa, Middle East, Europe, South America)
+  - Type of service: "Permit Specialist", "Full-Service Handling (Trip Support)", "Technology/Software Provider"
+  - Supported services (Array of strings)
+  - Contact details (Email, Phone, Official Website)
+  - Rating based on market reputation (1-5)
+  
+  Return a JSON array of objects:
+  [
+    {
+      "name": "string",
+      "headquarters": "string",
+      "regions": ["string"],
+      "serviceType": "string",
+      "services": ["string"],
+      "contactEmail": "string",
+      "phone": "string",
+      "website": "string",
+      "rating": number,
+      "ai_verified": true,
+      "scraping_source": "string (URL or Search)"
+    }
+  ]
+  
+  Only include REAL, currently operating trip support and permit agencies. If the query refers to a specific website, extract as many details as possible from that source.`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'scrapePermitProviders');
+    return [];
+  }
+}
+
+export async function getPermitDetailsByCountry(country: string) {
+  const prompt = `Research the Civil Aviation Authority (CAA) and permit requirements for ${country}.
+  
+  Find:
+  - Name of the CAA
+  - Lead time for Overfly Permit (e.g., 72 hours)
+  - Lead time for Landing Permit
+  - Required documents (e.g., Airworthiness, Insurance, GenDec)
+  - Official CAA website / Permit Portal
+  - Any specific local requirements or restrictions
+  
+  Return a JSON object:
+  {
+    "country": "${country}",
+    "caaName": "string",
+    "overflyLeadTime": "string",
+    "landingLeadTime": "string",
+    "requiredDocuments": ["string"],
+    "caaWebsite": "string",
+    "notes": "string"
+  }`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'getPermitDetailsByCountry');
     return null;
   }
 }

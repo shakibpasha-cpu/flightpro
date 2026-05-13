@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Globe, Shield, DollarSign, Loader2, Plus, Trash2, Edit2, Check, X, AlertTriangle, Sparkles, Phone, FileText, Link as LinkIcon, Mail, MapPin } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, query, getDocs, deleteDoc, doc, updateDoc, limit, where, writeBatch } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 import { getFIRDetails, fetchSpecificCharge, fetchFIRRules, searchFIRsByCountry } from '../services/aiService';
 
 interface FIR {

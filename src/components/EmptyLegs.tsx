@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plane, MapPin, Calendar, Tag, Search, Filter, Loader2, ArrowRight, Sparkles, TrendingDown } from 'lucide-react';
 import { collection, getDocs, query, limit } from 'firebase/firestore';
 import { db } from '../firebase';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 
 interface EmptyLeg {
   id: string;

@@ -2,7 +2,6 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import dotenv from "dotenv";
 import fs from 'fs';
 import pkg from 'pg';
@@ -471,10 +470,6 @@ app.post("/api/scrape-fleet", async (req, res) => {
     console.error("Fleet scraping error:", error);
     res.status(500).json({ error: "Failed to scrape fleet information" });
   }
-});
-
-app.post("/api/scrape-aircraft-specs", async (req, res) => {
-  res.status(410).json({ error: "This endpoint is deprecated. Use frontend Gemini API directly." });
 });
 
 app.post("/api/quote-multileg", async (req, res) => {

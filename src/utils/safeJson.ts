@@ -4,41 +4,67 @@
 export function safeStringify(obj: any, indent: number | string = 2): string {
   const cache = new WeakSet();
   
+  // Defensive helper to pre-clone and clean objects before JSON.stringify
+  // This bypasses many issues with custom toJSON methods and library-specific circularity
+  const cleanObject = (val: any): any => {
+    if (val === null || typeof val !== 'object') {
+      if (typeof val === 'bigint') return val.toString() + 'n';
+      if (typeof val === 'function') return '[Function]';
+      return val;
+    }
+
+    // Handle circularity
+    if (cache.has(val)) {
+      return '[Circular]';
+    }
+    cache.add(val);
+
+    // Handle special types
+    if (val instanceof Error) {
+      return {
+        name: val.name,
+        message: val.message,
+        stack: val.stack
+      };
+    }
+    
+    if (val instanceof Date) return val.toISOString();
+    if (val instanceof RegExp) return val.toString();
+    
+    // Detection for DOM nodes or Window
+    if ('nodeType' in val && typeof val.nodeType === 'number') return '[DOM Node]';
+    if (val === window) return '[Window]';
+    if (val === document) return '[Document]';
+
+    // Detection for Leaflet or similar library objects that often cause issues
+    if (val._leaflet_id || val._latlng || val._icon || val._layers) {
+      return `[Library Object: ${val.constructor?.name || 'Unknown'}]`;
+    }
+
+    if (Array.isArray(val)) {
+      return val.map(item => cleanObject(item));
+    }
+
+    const result: any = {};
+    for (const key in val) {
+      if (Object.prototype.hasOwnProperty.call(val, key)) {
+        // Skip common circular keys in events or library objects
+        if (key === 'srcElement' || key === 'target' || key === 'view' || key === 'parentElement') {
+          // Add basic summary instead of deep dive if it looks suspicious
+        }
+        result[key] = cleanObject(val[key]);
+      }
+    }
+    return result;
+  };
+
   try {
-    return JSON.stringify(
-      obj,
-      (key, value) => {
-        // Handle basic types that JSON.stringify might struggle with or return {} for
-        if (typeof value === 'bigint') {
-          return value.toString() + 'n';
-        }
-        
-        if (value instanceof Error) {
-          return {
-            name: value.name,
-            message: value.message,
-            stack: value.stack
-          };
-        }
-
-        // Handle circular references
-        if (typeof value === 'object' && value !== null) {
-          // Detect if it's a DOM node - these are never meaningful to stringify for AI
-          if ('nodeType' in value && typeof value.nodeType === 'number') {
-            return '[DOM Node]';
-          }
-
-          if (cache.has(value)) {
-            return '[Circular]';
-          }
-          cache.add(value);
-        }
-        return value;
-      },
-      indent
-    );
+    const cleaned = cleanObject(obj);
+    return JSON.stringify(cleaned, null, indent);
   } catch (error) {
-    console.error('Final fallback in safeStringify failed:', error);
+    // Highly defensive error logging
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn('safeStringify fallback triggered:', errorMessage);
     return '[Error Stringifying Object]';
   }
 }

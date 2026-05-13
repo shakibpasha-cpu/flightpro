@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 import { Building2, Plus, Search, Globe, MapPin, Star, Trash2, Edit2, X, Loader2, Sparkles, Mail, CheckCircle2, XCircle, ShieldCheck, Phone, Link, Hash, Info, Calendar, Briefcase, Filter, ExternalLink, Plane, RefreshCw } from 'lucide-react';
 import { operatorService, Operator } from '../services/operatorService';
 import { safeStringify } from '../utils/safeJson';
@@ -201,22 +201,22 @@ export default function OperatorDatabase() {
   const handleEnrichOperator = async (airlineName: string, id: string, country?: string) => {
     setScrapingId(id);
     try {
-      const response = await fetch('/api/enrich-operator', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: safeStringify({ operatorName: airlineName, country })
-      });
-
-      if (response.ok) {
-        const enrichedData = await response.json();
+      const enrichedData = await getOperatorDetails(airlineName, country);
+      
+      if (enrichedData) {
         const { doc, updateDoc } = await import('firebase/firestore');
         const opDocRef = doc(db, 'operators', id);
         await updateDoc(opDocRef, {
           website: enrichedData.website || '',
-          contact_email: enrichedData.contact_email || '',
+          contact_email: enrichedData.email || '',
           phone: enrichedData.phone || '',
-          address: enrichedData.address || '',
-          general_notes: enrichedData.general_notes || '',
+          icao_code: enrichedData.icao_code || '',
+          iata_code: enrichedData.iata_code || '',
+          callsign: enrichedData.callsign || '',
+          general_notes: enrichedData.summary || '',
+          fleet_quantity: enrichedData.fleet_quantity || 0,
+          avg_fleet_age: enrichedData.avg_fleet_age || 0,
+          aircraft_types_operated: enrichedData.aircraft_types_operated || [],
           last_enriched: new Date().toISOString()
         });
         alert(`Contact info for ${airlineName} updated successfully!`);

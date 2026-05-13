@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, query, orderBy, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
+import { getAI } from '../services/aiService';
 
 interface AOCData {
   operator_name: string;
@@ -71,9 +72,37 @@ export default function AuthorityIntelligence() {
         body: safeStringify({ url })
       });
 
-      if (!response.ok) throw new Error('Failed to scrape website');
+      if (!response.ok) throw new Error('Failed to fetch website content');
 
-      const data = await response.json();
+      const scrapeResult = await response.json();
+      const content = scrapeResult.content;
+
+      // 2. Process with AI in Frontend
+      const prompt = `Analyze this aviation authority website content and extract the official authority name, country, and a list of AOC (Air Operator Certificate) holders mentioned.
+      URL: ${url}
+      Content: ${content}
+      
+      Return JSON format:
+      {
+        "authority_name": "...",
+        "country": "...",
+        "website": "${url}",
+        "scraping_type": "${scrapeResult.isPdf ? 'PDF' : 'HTML'}",
+        "last_scraped": "${new Date().toISOString()}",
+        "aoc_data": [
+          { "operator_name": "...", "aoc_number": "...", "operation_type": "Schduled/Charter/Cargo" }
+        ]
+      }`;
+
+      const ai = getAI();
+      const aiResponse = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { responseMimeType: "application/json" }
+      });
+
+      if (!aiResponse.text) throw new Error("AI failed to parse the content");
+      const data = JSON.parse(aiResponse.text);
       setScrapedData(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unknown error occurred');

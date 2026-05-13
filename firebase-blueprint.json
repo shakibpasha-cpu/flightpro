@@ -485,6 +485,67 @@
       },
       "required": ["registration", "type"]
     },
+    "MROProvider": {
+      "title": "MROProvider",
+      "description": "Aircraft Maintenance, Repair, and Overhaul (MRO) service providers.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "airports": { "type": "array", "items": { "type": "string" }, "description": "ICAO codes of airports where services are provided" },
+        "capabilities": { "type": "array", "items": { "type": "string" }, "description": "e.g., A-Check, B-Check, Engine Overhaul, Avionics" },
+        "certifications": { "type": "array", "items": { "type": "string" }, "description": "e.g., EASA Part 145, FAA Part 145" },
+        "aircraftTypes": { "type": "array", "items": { "type": "string" }, "description": "Airplanes supported for maintenance" },
+        "contactEmail": { "type": "string" },
+        "phone": { "type": "string" },
+        "website": { "type": "string" },
+        "headquarters": { "type": "string" },
+        "rating": { "type": "number" },
+        "ai_verified": { "type": "boolean" },
+        "last_updated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "airports"]
+    },
+    "CateringProvider": {
+      "title": "CateringProvider",
+      "description": "In-flight catering service providers at airports.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "airports": { "type": "array", "items": { "type": "string" }, "description": "ICAO codes of airports where services are provided" },
+        "capabilities": { "type": "array", "items": { "type": "string" }, "description": "e.g., Halal, Kosher, VIP Catering, Economy" },
+        "certifications": { "type": "array", "items": { "type": "string" }, "description": "e.g., HACCP, ISO 22000" },
+        "aircraftTypes": { "type": "array", "items": { "type": "string" }, "description": "Supported aircraft types for catering" },
+        "contactEmail": { "type": "string" },
+        "phone": { "type": "string" },
+        "website": { "type": "string" },
+        "headquarters": { "type": "string" },
+        "rating": { "type": "number" },
+        "ai_verified": { "type": "boolean" },
+        "cateringFee": { "type": "number", "description": "Standard catering fee per flight" },
+        "last_updated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "airports"]
+    },
+    "FuelProvider": {
+      "title": "FuelProvider",
+      "description": "Aviation fuel service providers and FBO fueling services.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "airports": { "type": "array", "items": { "type": "string" }, "description": "ICAO codes of airports where services are provided" },
+        "fuelTypes": { "type": "array", "items": { "type": "string" }, "description": "e.g., Jet A-1, SAF, Avgas 100LL" },
+        "services": { "type": "array", "items": { "type": "string" }, "description": "e.g., Into-plane fueling, Defueling" },
+        "contactEmail": { "type": "string" },
+        "phone": { "type": "string" },
+        "website": { "type": "string" },
+        "headquarters": { "type": "string" },
+        "rating": { "type": "number" },
+        "ai_verified": { "type": "boolean" },
+        "providerType": { "type": "string", "enum": ["Fuel Company", "FBO", "Airport Authority"] },
+        "last_updated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "airports"]
+    },
     "Notification": {
       "title": "Notification",
       "description": "Critical alerts for users regarding delays, weather, or airspace warnings.",
@@ -500,9 +561,32 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "title", "message", "type", "status", "createdAt"]
+    },
+    "PermitProvider": {
+      "title": "PermitProvider",
+      "description": "Companies providing landing and overfly permit assistance.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "headquarters": { "type": "string" },
+        "regions": { "type": "array", "items": { "type": "string" }, "description": "Regions of expertise" },
+        "serviceType": { "type": "string", "description": "e.g., Permit Specialist, Trip Support" },
+        "services": { "type": "array", "items": { "type": "string" }, "description": "e.g., Overfly Permits, Landing Permits" },
+        "contactEmail": { "type": "string" },
+        "phone": { "type": "string" },
+        "website": { "type": "string" },
+        "rating": { "type": "number" },
+        "ai_verified": { "type": "boolean" },
+        "last_updated": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name"]
     }
   },
   "firestore": {
+    "/catering_providers/{id}": { "schema": { "$ref": "CateringProvider" }, "description": "Catering service providers database" },
+    "/fuel_providers/{id}": { "schema": { "$ref": "FuelProvider" }, "description": "Aviation fuel service providers database" },
+    "/permit_providers/{id}": { "schema": { "$ref": "PermitProvider" }, "description": "Permit service providers database" },
+    "/mro_providers/{id}": { "schema": { "$ref": "MROProvider" }, "description": "MRO service providers database" },
     "/notifications/{id}": { "schema": { "$ref": "Notification" }, "description": "User notifications" },
     "/aircraft/{id}": { "schema": { "$ref": "Aircraft" }, "description": "Individual aircraft details" },
     "/aircraft_master/{id}": { "schema": { "$ref": "AircraftMaster" }, "description": "Static aircraft technical data" },

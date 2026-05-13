@@ -4,7 +4,7 @@ import { Search, Globe, Loader2, ExternalLink, Download, AlertCircle, Database, 
 import { getAI, handleAiError } from '../services/aiService';
 import { db } from '../firebase';
 import { collection, addDoc } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 
 interface ScrapedAircraft {
   type?: string;

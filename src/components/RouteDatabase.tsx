@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { MapPin, Plus, Trash2, Edit2, Save, X, Loader2, Search, Globe, Clock } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface Route {

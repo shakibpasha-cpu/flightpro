@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DollarSign, Fuel, Landmark, UserCheck, Percent, Save, Loader2, Info, Database, Zap } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, getDoc, setDoc, collection, addDoc, getDocs, query, where } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 import { motion } from 'motion/react';
 import { REAL_WORLD_ACMI_RATES } from '../constants/aircraftData';
 

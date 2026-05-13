@@ -7,73 +7,46 @@ export const CHART_LAYERS = {
     url: (isDark: boolean) => isDark 
       ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
       : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    attribution: '&copy; OpenStreetMap & CARTO',
     maxZoom: 18,
     subdomains: 'abcd',
     tms: false
   },
-  vfr: {
-    id: 'vfr',
-    name: 'VFR Sectional (US)',
+  sectional: {
+    id: 'sectional',
+    name: 'VFR Sectional',
     url: "https://tiles.arcgis.com/tiles/ssSGoCbaAsSRiZat/arcgis/rest/services/VFR_Sectional/MapServer/tile/{z}/{y}/{x}",
-    attribution: 'FAA Sectional Charts',
+    attribution: 'FAA VFR Sectional',
     maxZoom: 12,
     tms: false,
     subdomains: []
   },
-  ifrLow: {
-    id: 'ifrLow',
-    name: 'IFR Low Enroute (US)',
+  enrouteLow: {
+    id: 'enrouteLow',
+    name: 'IFR Low Enroute',
     url: "https://tiles.arcgis.com/tiles/ssSGoCbaAsSRiZat/arcgis/rest/services/IFR_Low_Enroute/MapServer/tile/{z}/{y}/{x}",
-    attribution: 'FAA IFR Low Enroute',
+    attribution: 'FAA IFR Low',
     maxZoom: 12,
     tms: false,
     subdomains: []
   },
-  ifrHigh: {
-    id: 'ifrHigh',
-    name: 'IFR High Enroute (US)',
+  enrouteHigh: {
+    id: 'enrouteHigh',
+    name: 'IFR High Enroute',
     url: "https://tiles.arcgis.com/tiles/ssSGoCbaAsSRiZat/arcgis/rest/services/IFR_High_Enroute/MapServer/tile/{z}/{y}/{x}",
-    attribution: 'FAA IFR High Enroute',
+    attribution: 'FAA IFR High',
     maxZoom: 12,
     tms: false,
     subdomains: []
   },
   worldVfr: {
     id: 'worldVfr',
-    name: 'World VFR Chart',
+    name: 'World VFR',
     url: "https://{s}.tile.openflightmaps.org/live/vfr/latest/pad/{z}/{x}/{y}.png",
-    attribution: '&copy; OpenFlightMaps contributors',
+    attribution: '&copy; OpenFlightMaps',
     subdomains: 'abc',
     maxZoom: 12,
     tms: false
-  },
-  skyVectorVfr: {
-    id: 'skyVectorVfr',
-    name: 'SkyVector VFR',
-    url: "/api/v1/charts/skyvector/vfr/{z}/{x}/{y}.jpg",
-    attribution: '&copy; SkyVector',
-    maxZoom: 11,
-    tms: true,
-    subdomains: []
-  },
-  skyVectorIfrLow: {
-    id: 'skyVectorIfrLow',
-    name: 'SkyVector IFR Low',
-    url: "/api/v1/charts/skyvector/lo/{z}/{x}/{y}.jpg",
-    attribution: '&copy; SkyVector',
-    maxZoom: 11,
-    tms: true,
-    subdomains: []
-  },
-  skyVectorIfrHigh: {
-    id: 'skyVectorIfrHigh',
-    name: 'SkyVector IFR High',
-    url: "/api/v1/charts/skyvector/hi/{z}/{x}/{y}.jpg",
-    attribution: '&copy; SkyVector',
-    maxZoom: 11,
-    tms: true,
-    subdomains: []
   }
 };
 

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plane, MapPin, Calendar, Users, Weight, Plus, Trash2, Save, Edit2, ChevronRight, ChevronDown, Clock, DollarSign, Activity, AlertCircle, CheckCircle2, Sparkles, Map as MapIcon, GripVertical, AlertTriangle, Shield, Phone, Mail, Link as LinkIcon, FileText, Globe, Building2, Timer, ArrowUpDown, Info, Star, Wand2, Loader2, ShieldCheck, Zap, ShieldAlert, Search, X, Printer, Send } from 'lucide-react';
+import { Plane, MapPin, Calendar, Users, Weight, Plus, Trash2, Save, Edit2, ChevronRight, ChevronDown, Clock, DollarSign, Activity, AlertCircle, CheckCircle2, Sparkles, Map as MapIcon, GripVertical, AlertTriangle, Shield, Phone, Mail, Link as LinkIcon, FileText, Globe, Building2, Timer, ArrowUpDown, Info, Star, Wand2, Loader2, ShieldCheck, Zap, ShieldAlert, Search, X, Printer, Send, Wind } from 'lucide-react';
 import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, orderBy, where } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 import { onAuthStateChanged } from 'firebase/auth';
 import FlightMap from './FlightMap';
 import { searchAirports, getLegFIRAnalysis, getFIRDetails, fetchFIRRules, getOperationalRiskAssessment, getAirportDetails, searchHandlingAgents, enrichHandlingAgent, analyzePermits, analyzeFlightPlan } from '../services/aiService';
@@ -117,6 +117,8 @@ interface FlightPlan {
   totalFuel?: number;
   userId?: string;
   crewIds?: string[];
+  aiOptimizerNotes?: string;
+  totalEstimatedSavings?: number;
 }
 
 export default function MultiLegFlightPlanner() {
@@ -157,6 +159,11 @@ export default function MultiLegFlightPlanner() {
   const [isSavingAirport, setIsSavingAirport] = useState<Record<string, boolean>>({});
   const [enrichingLegIndex, setEnrichingLegIndex] = useState<number | null>(null);
   const [handlingSearchQueries, setHandlingSearchQueries] = useState<Record<number, string>>({});
+  const [isDrawingOnMap, setIsDrawingOnMap] = useState(false);
+
+  const [analyzingOptimization, setAnalyzingOptimization] = useState(false);
+  const [optimizationData, setOptimizationData] = useState<any>(null);
+  const [showOptimizationPanel, setShowOptimizationPanel] = useState(false);
 
   useEffect(() => {
     // Dynamic import to avoid circular dependency or load issues
@@ -701,6 +708,45 @@ export default function MultiLegFlightPlanner() {
       handleError(error, "full plan analysis");
     } finally {
       setAnalyzingFullPlan(false);
+    }
+  };
+
+  const performRouteOptimization = async () => {
+    if (!editingPlan || analyzingOptimization) return;
+    
+    // Check if we have at least one valid leg
+    if (editingPlan.legs.length === 0 || !editingPlan.legs[0].from || !editingPlan.legs[0].to) {
+      showNotification('Please enter a valid route first.', 'warning');
+      return;
+    }
+
+    setAnalyzingOptimization(true);
+    setShowOptimizationPanel(true);
+
+    try {
+      const { getOptimizedRoute } = await import('../services/aiService');
+      
+      const departure = editingPlan.legs[0].from;
+      const destination = editingPlan.legs[editingPlan.legs.length - 1].to;
+      const aircraft = {
+        type: editingPlan.legs[0].aircraftType,
+        fuelBurn: 2500 
+      };
+
+      const result = await getOptimizedRoute(
+        departure,
+        destination,
+        [], 
+        aircraft,
+        'most fuel-efficient',
+        editingPlan.legs[0].date
+      );
+
+      setOptimizationData(result);
+    } catch (error) {
+      handleError(error, "route optimization");
+    } finally {
+      setAnalyzingOptimization(false);
     }
   };
 
@@ -1977,6 +2023,7 @@ export default function MultiLegFlightPlanner() {
                        <div className="flex bg-gray-50 dark:bg-gray-900 p-1 rounded-xl border border-gray-100 dark:border-gray-800">
                           {[
                             { id: 'aircraft', icon: Sparkles, label: 'Optimization', color: 'text-indigo-600', onClick: applySuggestion },
+                            { id: 'fuel-opt', icon: Wind, label: 'Fuel Optimizer', color: 'text-indigo-600', onClick: performRouteOptimization },
                             { id: 'airspace', icon: Globe, label: 'FIR', color: 'text-amber-600', onClick: fetchAirspaceDetails },
                             { id: 'risk', icon: AlertTriangle, label: 'Risk', color: 'text-rose-600', onClick: performRiskAssessment },
                             { id: 'airport-intel', icon: Search, label: 'Airport Intel', color: 'text-blue-600', onClick: () => setShowAirportIntelPanel(!showAirportIntelPanel) },
@@ -2958,12 +3005,31 @@ export default function MultiLegFlightPlanner() {
                           <ShieldAlert className="text-rose-600" size={18} />
                           <h3 className="text-sm font-black text-rose-900 dark:text-rose-400 uppercase tracking-widest">Custom Restricted Areas</h3>
                         </div>
-                        <button 
-                          onClick={() => setShowRestrictionsPanel(false)}
-                          className="text-rose-600 hover:text-rose-800 text-[10px] font-bold uppercase"
-                        >
-                          Close
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => {
+                              setShowMap(true);
+                              setIsDrawingOnMap(!isDrawingOnMap);
+                            }}
+                            className={`flex items-center gap-2 px-3 py-1.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all ${
+                              isDrawingOnMap 
+                                ? 'bg-rose-600 text-white shadow-lg shadow-rose-500/30' 
+                                : 'bg-white dark:bg-gray-800 text-rose-600 border border-rose-200 dark:border-rose-900/30 hover:bg-rose-50'
+                            }`}
+                          >
+                            {isDrawingOnMap ? <X size={14} /> : <Wand2 size={14} />}
+                            {isDrawingOnMap ? 'Exit Drawing' : 'Start Drawing'}
+                          </button>
+                          <button 
+                            onClick={() => {
+                              setShowRestrictionsPanel(false);
+                              setIsDrawingOnMap(false);
+                            }}
+                            className="text-rose-600 hover:text-rose-800 text-[10px] font-bold uppercase"
+                          >
+                            Close
+                          </button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -3040,6 +3106,133 @@ export default function MultiLegFlightPlanner() {
                           </div>
                         </div>
                       </div>
+                    </motion.div>
+                  )}
+
+                  {showOptimizationPanel && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 20 }}
+                      className="bg-emerald-50 dark:bg-emerald-900/10 rounded-3xl border border-emerald-100 dark:border-emerald-900/30 p-6 space-y-6"
+                    >
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <Wind className="text-emerald-600" size={18} />
+                          <h3 className="text-sm font-black text-emerald-900 dark:text-emerald-400 uppercase tracking-widest">Route Fuel Efficiency Optimizer</h3>
+                        </div>
+                        <button 
+                          onClick={() => setShowOptimizationPanel(false)}
+                          className="text-emerald-600 hover:text-emerald-800 text-[10px] font-bold uppercase"
+                        >
+                          Close
+                        </button>
+                      </div>
+
+                      {analyzingOptimization ? (
+                        <div className="flex flex-col items-center py-20 bg-white/50 dark:bg-gray-900/20 rounded-3xl border border-dashed border-emerald-200 dark:border-emerald-800/30">
+                          <Loader2 className="animate-spin text-emerald-500 mb-6" size={48} />
+                          <p className="text-sm font-black text-emerald-900 dark:text-emerald-400 uppercase tracking-[0.3em] mb-2 animate-pulse">Calculating Efficiency Vectors</p>
+                          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest text-center max-w-xs">AI is auditing METARs, TAFs, and FIR charge scales for optimal cost-containment...</p>
+                        </div>
+                      ) : optimizationData ? (
+                        <div className="space-y-8">
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {optimizationData.alternatives.map((alt: any, idx: number) => (
+                              <motion.div
+                                key={idx}
+                                whileHover={{ y: -5 }}
+                                className={`p-6 rounded-3xl border relative overflow-hidden ${
+                                  idx === 0 
+                                    ? 'bg-emerald-600 text-white border-transparent shadow-xl' 
+                                    : 'bg-white dark:bg-gray-800 border-emerald-100 dark:border-emerald-800/50'
+                                }`}
+                              >
+                                {idx === 0 && (
+                                  <div className="absolute top-2 right-2 bg-white/20 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest">
+                                    AI Primary
+                                  </div>
+                                )}
+                                <h4 className={`text-lg font-black uppercase mb-4 ${idx === 0 ? 'text-white' : 'text-gray-900 dark:text-white'}`}>{alt.name}</h4>
+                                
+                                <div className="grid grid-cols-2 gap-4 mb-6">
+                                  <div>
+                                    <p className={`text-[8px] font-black uppercase tracking-widest ${idx === 0 ? 'opacity-70' : 'text-gray-400'}`}>Est. Savings</p>
+                                    <p className="text-xl font-black text-emerald-500">${alt.totalSavings?.toLocaleString()}</p>
+                                  </div>
+                                  <div>
+                                    <p className={`text-[8px] font-black uppercase tracking-widest ${idx === 0 ? 'opacity-70' : 'text-gray-400'}`}>Efficiency</p>
+                                    <p className="text-xl font-black">+{alt.fuelSavingsPercent}%</p>
+                                  </div>
+                                </div>
+
+                                <div className={`p-4 rounded-2xl text-[10px] leading-relaxed italic mb-4 ${idx === 0 ? 'bg-white/10' : 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400'}`}>
+                                  "{alt.detourLogic}"
+                                </div>
+
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <Wind size={10} className={idx === 0 ? 'opacity-70' : 'text-emerald-500'} />
+                                    <span className="text-[9px] font-bold uppercase tracking-widest truncate">{alt.routingChanges}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Clock size={10} className={idx === 0 ? 'opacity-70' : 'text-emerald-500'} />
+                                    <span className="text-[9px] font-bold uppercase tracking-widest truncate">{alt.totalTime} Total Duration</span>
+                                  </div>
+                                </div>
+
+                                <button 
+                                  onClick={() => {
+                                    // Logic to apply this route
+                                    showNotification('Route changes suggested by AI have been logged in the mission brief.', 'success');
+                                    setEditingPlan(prev => {
+                                      if (!prev) return null;
+                                      return {
+                                        ...prev,
+                                        aiOptimizerNotes: alt.routingChanges + " | " + alt.detourLogic,
+                                        totalEstimatedSavings: (prev.totalEstimatedSavings || 0) + (alt.totalSavings || 0)
+                                      };
+                                    });
+                                  }}
+                                  className={`w-full mt-6 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                                    idx === 0 
+                                      ? 'bg-white text-emerald-600 hover:bg-emerald-50' 
+                                      : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                  }`}
+                                >
+                                  Lock This Sequence
+                                </button>
+                              </motion.div>
+                            ))}
+                          </div>
+
+                          <div className="bg-white dark:bg-gray-800/40 border border-emerald-100 dark:border-emerald-800/50 p-6 rounded-[2.5rem] flex items-start gap-6">
+                            <div className="w-12 h-12 bg-emerald-100 dark:bg-emerald-900/30 rounded-2xl flex items-center justify-center text-emerald-600 shrink-0">
+                              <Sparkles size={24} />
+                            </div>
+                            <div>
+                              <h4 className="text-[11px] font-black text-emerald-800 dark:text-emerald-400 uppercase tracking-[0.2em] mb-2">Meteorological Intelligence Summary</h4>
+                              <p className="text-sm text-gray-600 dark:text-gray-400 font-medium leading-relaxed italic">
+                                "{optimizationData.summary}"
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="p-12 border-2 border-dashed border-emerald-200 dark:border-emerald-800/30 rounded-3xl flex flex-col items-center gap-4 text-center">
+                          <Wind size={32} className="text-emerald-300" />
+                          <div>
+                            <p className="text-sm font-black text-emerald-800 dark:text-emerald-400 uppercase tracking-widest">No Optimization Data</p>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Click the 'Deep AI Enrichment' or the Analyze button to start.</p>
+                          </div>
+                          <button 
+                            onClick={performRouteOptimization}
+                            className="bg-emerald-600 text-white px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-200 dark:shadow-none hover:bg-emerald-700 transition-all"
+                          >
+                            Analyze Fuel Efficiency
+                          </button>
+                        </div>
+                      )}
                     </motion.div>
                   )}
 
@@ -3260,7 +3453,9 @@ export default function MultiLegFlightPlanner() {
                       aircraftType={editingPlan.legs[0]?.aircraftType}
                       onMapClick={handleMapClick}
                       onLegsChange={handleLegsChangeFromMap}
-                      onRestrictedAreasChange={(areas) => setEditingPlan({ ...editingPlan, restrictedAreas: areas })}
+                      onRestrictedAreasChange={(areas) => setEditingPlan(prev => prev ? { ...prev, restrictedAreas: areas } : null)}
+                      forceDrawingMode={isDrawingOnMap}
+                      onDrawingModeChange={setIsDrawingOnMap}
                     />
                   </div>
                 )}
@@ -3358,7 +3553,9 @@ export default function MultiLegFlightPlanner() {
                       aircraftType={editingPlan.legs[0]?.aircraftType}
                       onMapClick={handleMapClick}
                       onLegsChange={handleLegsChangeFromMap}
-                      onRestrictedAreasChange={(areas) => setEditingPlan({ ...editingPlan, restrictedAreas: areas })}
+                      onRestrictedAreasChange={(areas) => setEditingPlan(prev => prev ? { ...prev, restrictedAreas: areas } : null)}
+                      forceDrawingMode={isDrawingOnMap}
+                      onDrawingModeChange={setIsDrawingOnMap}
                     />
                   </div>
                 </div>

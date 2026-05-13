@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { Plane, MapPin, Activity, History, Loader2, AlertCircle, RefreshCw, Navigation, Info, ExternalLink, Sparkles, Clock, Calendar, Zap } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 import FlightMap from './FlightMap';
 import { predictAircraftAvailability, AIPrediction } from '../services/aiPredictionService';
 

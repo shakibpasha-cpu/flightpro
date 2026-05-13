@@ -3,7 +3,7 @@ import { Users, Search, Plus, Filter, MoreVertical, Mail, Phone, Calendar, Dolla
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from '../firebase';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 
 interface Lead {
   id: string;

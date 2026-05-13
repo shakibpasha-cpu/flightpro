@@ -5,7 +5,7 @@ import { calculateAvailability, AvailabilityStatus } from '../services/availabil
 import { getOperatorDetails } from '../services/aiService';
 import { db } from '../firebase';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 
 interface OperatorProfile {
   operator_name: string;

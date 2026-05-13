@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Plane, Search, Calendar, MapPin, Shield, Info, DollarSign, UserCheck, Settings, Loader2, Filter, ChevronRight, ExternalLink, X, Weight, Sparkles, ArrowRight, TrendingUp, AlertTriangle, Mail, Globe } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, getDocs, query, where, updateDoc, doc } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 import { motion, AnimatePresence } from 'motion/react';
 import { getFlightRouteDetails, getSuggestedAircraft, getOperatorDetails } from '../services/aiService';
 import AircraftDetailPage from './AircraftDetailPage';

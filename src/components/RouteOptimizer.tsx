@@ -138,7 +138,7 @@ export default function RouteOptimizer({
                 exit={{ opacity: 0, y: -10 }}
                 className="space-y-6"
               >
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-2xl border border-emerald-100 dark:border-emerald-800/50">
                     <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 mb-1">
                       <DollarSign size={14} />
@@ -153,9 +153,35 @@ export default function RouteOptimizer({
                     </div>
                     <p className="text-xl font-black text-gray-900 dark:text-white">{selectedAlt.totalTime}</p>
                   </div>
+                  <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-2xl border border-amber-100 dark:border-amber-800/50">
+                    <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 mb-1">
+                      <Wind size={14} />
+                      <span className="text-[10px] font-black uppercase tracking-widest">Fuel Burn</span>
+                    </div>
+                    <p className="text-xl font-black text-gray-900 dark:text-white">{selectedAlt.fuelBurn?.toLocaleString()} <span className="text-[10px]">KG/LB</span></p>
+                  </div>
+                  <div className="p-4 bg-rose-50 dark:bg-rose-900/20 rounded-2xl border border-rose-100 dark:border-rose-800/50">
+                    <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 mb-1">
+                      <Zap size={14} />
+                      <span className="text-[10px] font-black uppercase tracking-widest">Efficiency</span>
+                    </div>
+                    <p className="text-xl font-black text-gray-900 dark:text-white">+{selectedAlt.fuelSavingsPercent}%</p>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
+                  {selectedAlt.detourLogic && (
+                    <div className="flex items-start gap-3">
+                      <div className="w-8 h-8 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <Zap size={16} />
+                      </div>
+                      <div>
+                        <h5 className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1">Detour Intelligence</h5>
+                        <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed font-bold italic">{selectedAlt.detourLogic}</p>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex items-start gap-3">
                     <div className="w-8 h-8 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-lg flex items-center justify-center flex-shrink-0">
                       <CloudRain size={16} />

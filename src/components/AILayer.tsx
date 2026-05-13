@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getSuggestedAircraft, getEmptyLegs, getNegotiationStrategy, getFlightRouteDetails, optimizeRoute, getOperationalRiskAssessment, getFuelStopSuggestions } from '../services/aiService';
 import { db } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 
 interface AILayerProps {
   missionData: {

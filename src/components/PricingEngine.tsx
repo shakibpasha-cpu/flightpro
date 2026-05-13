@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DollarSign, Fuel, Globe, Landmark, UserCheck, ShieldCheck, Calculator, Loader2, Plane, MapPin, PlusCircle, TrendingUp, AlertTriangle, Sparkles, Calendar, ClipboardList, Users, Phone, Mail, ExternalLink, FileText, AlertCircle, Info, ChevronDown } from 'lucide-react';
+import { DollarSign, Fuel, Globe, Landmark, UserCheck, ShieldCheck, Calculator, Loader2, Plane, MapPin, PlusCircle, TrendingUp, AlertTriangle, Sparkles, Calendar, ClipboardList, Users, Phone, Mail, ExternalLink, FileText, AlertCircle, Info, ChevronDown, Wind, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -52,6 +52,8 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
   const [engineResult, setEngineResult] = useState<ACMIEngineResult | null>(null);
   const [alternatives, setAlternatives] = useState<any[]>([]);
   const [isCalculatingAlternatives, setIsCalculatingAlternatives] = useState(false);
+  const [detailedReportData, setDetailedReportData] = useState<any>(null);
+  const [loadingDetailedData, setLoadingDetailedData] = useState(false);
   
   // Calculation States (Manual Overrides)
   const [flightHours, setFlightHours] = useState(0);
@@ -77,6 +79,31 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
   const [loadingFirs, setLoadingFirs] = useState<Record<string, boolean>>({});
   const [showDetailedBreakdown, setShowDetailedBreakdown] = useState(false);
   
+  const [isOptimizingRoute, setIsOptimizingRoute] = useState(false);
+  const [routeOptimization, setRouteOptimization] = useState<any>(null);
+
+  const handleOptimizeRouteFull = async () => {
+    if (!departure || !destination) return;
+    setIsOptimizingRoute(true);
+    try {
+      // Import the service dynamically or use it directly if available
+      const { getOptimizedRoute } = await import('../services/aiService');
+      const result = await getOptimizedRoute(
+        departure, 
+        destination, 
+        Object.values(detailedFirs), 
+        selectedAircraft ? { type: selectedAircraft.type, fuelBurn: selectedAircraft.fuelBurnPerHour } : undefined,
+        'most fuel-efficient',
+        date
+      );
+      setRouteOptimization(result);
+    } catch (error) {
+      console.error('Route Optimization Error:', error);
+    } finally {
+      setIsOptimizingRoute(false);
+    }
+  };
+
   const selectedAircraft = aircraftList.find(a => a.id === selectedAircraftId);
 
   useEffect(() => {
@@ -166,6 +193,20 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
       setContingencyPercent(5); // Default to 5%
       setBrokerMargin(result.costs.brokerMargin);
       setProfitMarginPercent(result.brokerMarginRate * 100);
+
+      // Fetch Detailed Report Data (including Service Providers)
+      setLoadingDetailedData(true);
+      getDetailedPDFReportData(
+        targetDeparture, targetDestination, selectedAircraft?.type || 'A320', 
+        { missionType: targetMissionType, date: targetDate, passengers: paramsOverride?.passengers ?? passengers, payload: paramsOverride?.payload ?? payload },
+        { engineResult: result }
+      ).then(data => {
+        setDetailedReportData(data);
+      }).catch(err => {
+        console.error('Failed to fetch detailed data:', err);
+      }).finally(() => {
+        setLoadingDetailedData(false);
+      });
 
       // Fetch FIR Details automatically for the route
       if (result.routeDetails?.firs?.length > 0) {
@@ -372,8 +413,8 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
       const timestamp = new Date().toLocaleString();
       
       // Attempt to get detailed data
-      let detailedData = null;
-      if (departure && destination && selectedAircraft) {
+      let detailedData = detailedReportData;
+      if (!detailedData && departure && destination && selectedAircraft) {
         detailedData = await getDetailedPDFReportData(
           departure, destination, selectedAircraft.type, 
           { missionType, date, passengers, payload },
@@ -526,6 +567,66 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
         
         autoTable(doc, { startY: finalY, head: [['Expense Category', 'Estimate / Notes']], body: sumTable, theme: 'grid', headStyles: { fillColor: [79, 70, 229] } });
         finalY = (doc as any).lastAutoTable.finalY + 15;
+
+        // MRO & Catering Suggestions
+        if (finalY > 200) { doc.addPage(); finalY = 20; }
+        doc.setFontSize(14);
+        doc.setTextColor(79, 70, 229);
+        doc.text('5. Service Provider Suggestions', 14, finalY);
+        finalY += 10;
+
+        if (detailedData.mroSuggestions?.length > 0) {
+          doc.setFontSize(11);
+          doc.setTextColor(50, 50, 50);
+          doc.text('A. Recommended MRO Providers', 14, finalY);
+          finalY += 5;
+          autoTable(doc, {
+            startY: finalY,
+            head: [['Provider Name', 'Airport', 'Capabilities', 'Rating']],
+            body: detailedData.mroSuggestions.map((mro: any) => [
+              mro.name, mro.airport, mro.capabilities?.join(', ') || '-', `${mro.rating || '-'}/5`
+            ]),
+            theme: 'striped',
+            headStyles: { fillColor: [100, 100, 100] }
+          });
+          finalY = (doc as any).lastAutoTable.finalY + 10;
+        }
+
+        if (detailedData.cateringSuggestions?.length > 0) {
+          if (finalY > 220) { doc.addPage(); finalY = 20; }
+          doc.setFontSize(11);
+          doc.setTextColor(50, 50, 50);
+          doc.text('B. Recommended catering Providers', 14, finalY);
+          finalY += 5;
+          autoTable(doc, {
+            startY: finalY,
+            head: [['Provider Name', 'Airport', 'Capabilities', 'Rating']],
+            body: detailedData.cateringSuggestions.map((cat: any) => [
+              cat.name, cat.airport, cat.capabilities?.join(', ') || '-', `${cat.rating || '-'}/5`
+            ]),
+            theme: 'striped',
+            headStyles: { fillColor: [100, 100, 100] }
+          });
+          finalY = (doc as any).lastAutoTable.finalY + 10;
+        }
+
+        if (detailedData.fuelSuggestions?.length > 0) {
+          if (finalY > 220) { doc.addPage(); finalY = 20; }
+          doc.setFontSize(11);
+          doc.setTextColor(50, 50, 50);
+          doc.text('C. Recommended Fuel Service Providers (FBOs)', 14, finalY);
+          finalY += 5;
+          autoTable(doc, {
+            startY: finalY,
+            head: [['Provider Name', 'Airport', 'Type', 'Rating']],
+            body: detailedData.fuelSuggestions.map((fuel: any) => [
+              fuel.name, fuel.airport, fuel.providerType || 'Fuel Provider', `${fuel.rating || '-'}/5`
+            ]),
+            theme: 'striped',
+            headStyles: { fillColor: [100, 100, 100] }
+          });
+          finalY = (doc as any).lastAutoTable.finalY + 10;
+        }
       } else {
         doc.setFontSize(14);
         doc.setTextColor(255, 0, 0);
@@ -1267,6 +1368,115 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
               </div>
             </div>
 
+            {/* AI Route Optimization Suggestions */}
+            {engineResult && (
+              <div className="mt-8 space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-black text-gray-900 dark:text-white uppercase tracking-tight flex items-center gap-3">
+                      <Wind className="text-indigo-600" size={24} />
+                      Route Optimization Intelligence
+                    </h3>
+                    <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mt-1">AI analyzing weather, FIRs, and fuel efficiency</p>
+                  </div>
+                  {!routeOptimization && !isOptimizingRoute && (
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      onClick={handleOptimizeRouteFull}
+                      className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 transition-all flex items-center gap-2"
+                    >
+                      <Zap size={14} />
+                      Analyze Better Routes
+                    </motion.button>
+                  )}
+                </div>
+
+                {isOptimizingRoute && (
+                  <div className="p-12 bg-gray-50 dark:bg-gray-900/50 rounded-3xl border border-dashed border-gray-200 dark:border-gray-700 flex flex-col items-center justify-center text-center space-y-4">
+                    <Loader2 className="text-indigo-600 animate-spin" size={40} />
+                    <div>
+                      <h4 className="font-black text-gray-900 dark:text-white uppercase tracking-widest text-sm">AI Engine is calculating...</h4>
+                      <p className="text-xs text-gray-500 font-bold uppercase mt-1">Reviewing JetStream patterns and FIR overflight costs</p>
+                    </div>
+                  </div>
+                )}
+
+                {routeOptimization && (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {routeOptimization.alternatives.map((alt: any, idx: number) => (
+                        <motion.div
+                          key={idx}
+                          initial={{ opacity: 0, y: 20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: idx * 0.1 }}
+                          className={`p-6 rounded-3xl border transition-all cursor-pointer ${
+                            idx === 0 
+                              ? 'bg-indigo-600 text-white border-transparent shadow-xl shadow-indigo-200 dark:shadow-none' 
+                              : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-900 dark:text-white hover:border-indigo-300'
+                          }`}
+                        >
+                          <div className="flex justify-between items-start mb-6">
+                            <div>
+                              <p className={`text-[10px] font-black uppercase tracking-[0.2em] mb-1 ${idx === 0 ? 'opacity-70' : 'text-indigo-600'}`}>
+                                {idx === 0 ? 'AI Recommended' : `Option ${idx + 1}`}
+                              </p>
+                              <h4 className="text-lg font-black leading-tight uppercase">{alt.name}</h4>
+                            </div>
+                            <div className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase ${idx === 0 ? 'bg-white/20' : 'bg-emerald-50 text-emerald-600'}`}>
+                              Save ${alt.totalSavings?.toLocaleString()}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4 mb-6">
+                            <div>
+                              <p className={`text-[9px] font-bold uppercase tracking-widest ${idx === 0 ? 'opacity-70' : 'text-gray-400'}`}>Fuel Burn</p>
+                              <p className="text-lg font-black">{alt.fuelBurn?.toLocaleString()} <span className="text-[10px]">KG</span></p>
+                            </div>
+                            <div>
+                              <p className={`text-[9px] font-bold uppercase tracking-widest ${idx === 0 ? 'opacity-70' : 'text-gray-400'}`}>Efficiency</p>
+                              <p className="text-lg font-black">+{alt.fuelSavingsPercent}%</p>
+                            </div>
+                          </div>
+
+                          <div className={`p-4 rounded-2xl text-[11px] leading-relaxed mb-6 italic ${idx === 0 ? 'bg-white/10' : 'bg-gray-50 dark:bg-gray-900'}`}>
+                            "{alt.detourLogic}"
+                          </div>
+
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <MapPin size={12} className={idx === 0 ? 'opacity-70' : 'text-indigo-500'} />
+                              <p className="text-[10px] font-black uppercase tracking-widest truncate">{alt.routingChanges}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Sparkles size={12} className={idx === 0 ? 'opacity-70' : 'text-indigo-500'} />
+                              <p className="text-[10px] font-bold uppercase tracking-widest truncate">FIR Optimization Applied</p>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                    
+                    <div className="bg-gray-900 text-white p-6 rounded-[2rem] border border-gray-800 shadow-2xl relative overflow-hidden group">
+                      <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform duration-500">
+                        <Sparkles size={120} />
+                      </div>
+                      <div className="relative z-10">
+                        <h4 className="text-[11px] font-black text-indigo-400 uppercase tracking-[0.3em] mb-4 flex items-center gap-2">
+                          <Wind size={14} />
+                          Meteorological & Operational Synopsis
+                        </h4>
+                        <p className="text-sm text-gray-400 leading-relaxed font-medium italic">
+                          {routeOptimization.summary}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Expandable Detailed Breakdown Section */}
             <AnimatePresence>
               {showDetailedBreakdown && (
@@ -1690,6 +1900,108 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
                             )}
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Service Provider Suggestions Section */}
+                  {(loadingDetailedData || (detailedReportData && (detailedReportData.mroSuggestions?.length > 0 || detailedReportData.cateringSuggestions?.length > 0 || detailedReportData.fuelSuggestions?.length > 0))) && (
+                    <div className="mt-8 pt-8 border-t border-gray-800">
+                      <div className="flex items-center justify-between mb-6">
+                        <h4 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                          <Sparkles size={14} />
+                          LOCAL SERVICE PROVIDER INTELLIGENCE
+                        </h4>
+                        {loadingDetailedData && (
+                          <div className="flex items-center gap-2 text-[10px] font-bold text-gray-500 uppercase animate-pulse">
+                            <Loader2 size={12} className="animate-spin" />
+                            Researching local providers...
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                        {/* MRO Suggestions */}
+                        <div className="space-y-4">
+                          <h5 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Maintenance & Repair (MRO)</h5>
+                          {detailedReportData?.mroSuggestions?.map((mro: any, idx: number) => (
+                            <div key={idx} className="bg-gray-800/20 border border-gray-700/50 p-4 rounded-2xl hover:border-indigo-500/30 transition-all">
+                              <div className="flex justify-between items-start mb-2">
+                                <p className="text-xs font-black text-white">{mro.name}</p>
+                                <div className="bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest">
+                                  {mro.airport}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-1 mb-2">
+                                {mro.capabilities?.map((cap: string, i: number) => (
+                                  <span key={i} className="text-[8px] px-1.5 py-0.5 bg-gray-700/50 text-gray-400 rounded-md font-bold uppercase">{cap}</span>
+                                ))}
+                              </div>
+                              <div className="flex items-center justify-between mt-3">
+                                <div className="flex items-center gap-0.5">
+                                  {[...Array(5)].map((_, i) => (
+                                    <div key={i} className={`w-1.5 h-1.5 rounded-full ${i < (mro.rating || 0) ? 'bg-amber-400' : 'bg-gray-700'}`} />
+                                  ))}
+                                </div>
+                                <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">Recommended</span>
+                              </div>
+                            </div>
+                          )) || !loadingDetailedData && <p className="text-[10px] text-gray-600 italic">No specific MRO recommendations.</p>}
+                        </div>
+
+                        {/* Catering Suggestions */}
+                        <div className="space-y-4">
+                          <h5 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">In-Flight Catering Services</h5>
+                          {detailedReportData?.cateringSuggestions?.map((cat: any, idx: number) => (
+                            <div key={idx} className="bg-gray-800/20 border border-gray-700/50 p-4 rounded-2xl hover:border-violet-500/30 transition-all">
+                              <div className="flex justify-between items-start mb-2">
+                                <p className="text-xs font-black text-white">{cat.name}</p>
+                                <div className="bg-violet-500/10 text-violet-400 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest">
+                                  {cat.airport}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-1 mb-2">
+                                {cat.capabilities?.map((cap: string, i: number) => (
+                                  <span key={i} className="text-[8px] px-1.5 py-0.5 bg-gray-700/50 text-gray-400 rounded-md font-bold uppercase">{cap}</span>
+                                ))}
+                              </div>
+                              <div className="flex items-center justify-between mt-3">
+                                <div className="flex items-center gap-0.5">
+                                  {[...Array(5)].map((_, i) => (
+                                    <div key={i} className={`w-1.5 h-1.5 rounded-full ${i < (cat.rating || 0) ? 'bg-amber-400' : 'bg-gray-700'}`} />
+                                  ))}
+                                </div>
+                                <span className="text-[9px] font-black text-violet-400 uppercase tracking-widest">Recommended</span>
+                              </div>
+                            </div>
+                          )) || !loadingDetailedData && <p className="text-[10px] text-gray-600 italic">No specific catering recommendations.</p>}
+                        </div>
+
+                        {/* Fuel Suggestions */}
+                        <div className="space-y-4">
+                          <h5 className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Fuel & FBO Services</h5>
+                          {detailedReportData?.fuelSuggestions?.map((fuel: any, idx: number) => (
+                            <div key={idx} className="bg-gray-800/20 border border-gray-700/50 p-4 rounded-2xl hover:border-emerald-500/30 transition-all">
+                              <div className="flex justify-between items-start mb-2">
+                                <p className="text-xs font-black text-white">{fuel.name}</p>
+                                <div className="bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest">
+                                  {fuel.airport}
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap gap-1 mb-2">
+                                <span className="text-[8px] px-1.5 py-0.5 bg-gray-700/50 text-gray-400 rounded-md font-bold uppercase">{fuel.providerType || 'Fuel Provider'}</span>
+                              </div>
+                              <div className="flex items-center justify-between mt-3">
+                                <div className="flex items-center gap-0.5">
+                                  {[...Array(5)].map((_, i) => (
+                                    <div key={i} className={`w-1.5 h-1.5 rounded-full ${i < (fuel.rating || 0) ? 'bg-amber-400' : 'bg-gray-700'}`} />
+                                  ))}
+                                </div>
+                                <span className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Recommended</span>
+                              </div>
+                            </div>
+                          )) || !loadingDetailedData && <p className="text-[10px] text-gray-600 italic">No specific fuel recommendations.</p>}
+                        </div>
                       </div>
                     </div>
                   )}

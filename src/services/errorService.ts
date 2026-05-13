@@ -1,3 +1,4 @@
+import { auth } from '../firebase';
 import { safeStringify } from '../utils/safeJson';
 
 export enum OperationType {
@@ -32,18 +33,30 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: undefined, // Will be populated in the component if needed or use a global auth ref
-      email: undefined,
-      emailVerified: undefined,
-      isAnonymous: undefined,
-      tenantId: undefined,
-      providerInfo: []
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
     },
     operationType,
     path
   };
-  console.error('Firestore Error: ', safeStringify(errInfo));
-  throw new Error(safeStringify(errInfo));
+  let errorMessage;
+  try {
+    errorMessage = safeStringify(errInfo);
+  } catch (stringifyError) {
+    errorMessage = JSON.stringify({ error: errInfo.error, operationType: errInfo.operationType, path: errInfo.path });
+  }
+
+  console.error('Firestore Error: ', errorMessage);
+  throw new Error(errorMessage);
 }
 
 export interface ApiErrorInfo {

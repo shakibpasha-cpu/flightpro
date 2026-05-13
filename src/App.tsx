@@ -13,8 +13,12 @@ import { CHART_LAYERS, DefaultIcon, getBearing, getMidpoint, calculateDistance }
 import { db, auth } from './firebase';
 import { collection, addDoc, getDocs, getDocFromServer, doc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { handleFirestoreError, OperationType } from './utils/errorHandling';
+import { handleFirestoreError, OperationType } from './services/errorService';
 import { seedOperators } from './utils/seedOperators';
+import { seedMROProviders } from './utils/seedMRO';
+import { seedCateringProviders } from './utils/seedCatering';
+import { seedFuelProviders } from './utils/seedFuel';
+import { seedPermitProviders } from './utils/seedPermit';
 import { ChatAssistant } from './components/ChatAssistant';
 import FlightMap from './components/FlightMap';
 import AIPlanner from './components/AIPlanner';
@@ -62,6 +66,11 @@ import AvailabilityIntelligence from './components/AvailabilityIntelligence';
 import FeasibilityReport from './components/FeasibilityReport';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
+import MRODatabase from './components/MRODatabase';
+import CateringDatabase from './components/CateringDatabase';
+import FuelDatabase from './components/FuelDatabase';
+import PermitDatabase from './components/PermitDatabase';
+import CrewManagement from './components/CrewManagement';
 import Breadcrumbs from './components/Breadcrumbs';
 import PitchDeck from './components/PitchDeck';
 import { QuotaMonitor } from './components/QuotaMonitor';
@@ -532,6 +541,14 @@ export default function App() {
         await getDocFromServer(doc(db, 'settings', 'connection-test'));
         // Seed operators if needed
         await seedOperators();
+        // Seed MRO providers if needed
+        await seedMROProviders();
+        // Seed Catering providers if needed
+        await seedCateringProviders();
+        // Seed Fuel providers if needed
+        await seedFuelProviders();
+        // Seed Permit providers if needed
+        await seedPermitProviders();
       } catch (error) {
         if (error instanceof Error && error.message.includes('the client is offline')) {
           console.error("Firestore connection failed: The client is offline. Please check your Firebase configuration.");
@@ -1031,6 +1048,10 @@ export default function App() {
             <div className="w-full">
               <CharterBookingFlow aircraftList={aircraftList} />
             </div>
+          ) : activeTab === 'crew-management' ? (
+            <div className="max-w-7xl mx-auto">
+              <CrewManagement />
+            </div>
           ) : activeTab === 'ai-intelligence' ? (
             <div className="max-w-7xl mx-auto">
               <AILayer 
@@ -1311,6 +1332,22 @@ export default function App() {
           ) : activeTab === 'authority-intelligence' ? (
             <div className="max-w-7xl mx-auto">
               <AuthorityIntelligence />
+            </div>
+          ) : activeTab === 'mro-database' || activeTab === 'mro-intelligence' ? (
+            <div className="max-w-7xl mx-auto">
+              <MRODatabase />
+            </div>
+          ) : activeTab === 'catering' ? (
+            <div className="max-w-7xl mx-auto">
+              <CateringDatabase />
+            </div>
+          ) : activeTab === 'fuel' ? (
+            <div className="max-w-7xl mx-auto">
+              <FuelDatabase />
+            </div>
+          ) : activeTab === 'permit-database' ? (
+            <div className="max-w-7xl mx-auto">
+              <PermitDatabase />
             </div>
           ) : activeTab === 'availability-intelligence' ? (
             <div className="max-w-7xl mx-auto">

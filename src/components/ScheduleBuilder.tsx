@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Plane, Plus, Trash2, AlertCircle, CheckCircle2, Save, Loader2, ChevronRight, ChevronLeft, Copy, History, Edit2, Zap, Sparkles, Building2, Mail, Phone, DollarSign, X, Globe } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, query, where, orderBy, Timestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 import { motion, AnimatePresence } from 'motion/react';
 import { optimizeFlightSchedule, getAirportCoords, searchHandlingAgents, getAirportDetails } from '../services/aiService';
 

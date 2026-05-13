@@ -24,7 +24,9 @@ import {
   Database,
   Cpu,
   Calculator,
-  TrendingUp
+  TrendingUp,
+  Utensils,
+  Droplets
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -44,6 +46,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
         { id: 'advanced-quote', label: 'Advanced Quote', icon: Zap },
         { id: 'tracking', label: 'Live Fleet Tracking', icon: Activity },
         { id: 'booking-flow', label: 'Booking Wizard', icon: Plane },
+        { id: 'crew-management', label: 'Crew Management', icon: Users },
       ]
     },
     {
@@ -53,6 +56,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
         { id: 'optimizer', label: 'Route Optimizer', icon: Zap },
         { id: 'availability-intelligence', label: 'Availability Intelligence', icon: Sparkles },
         { id: 'authority-intelligence', label: 'Authority Intelligence', icon: ShieldCheck },
+        { id: 'mro-intelligence', label: 'MRO Intelligence', icon: ShieldCheck },
         { id: 'intelligence', label: 'Market Intelligence', icon: BarChart3 },
         { id: 'feasibility', label: 'Feasibility Report', icon: TrendingUp },
       ]
@@ -78,6 +82,10 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
         { id: 'aeronautical-charts', label: 'Aeronautical Charts', icon: Globe },
         { id: 'firs', label: 'FIR Database', icon: Globe },
         { id: 'handling', label: 'Handling Agents', icon: Building2 },
+        { id: 'mro-database', label: 'MRO Database', icon: ShieldCheck },
+        { id: 'permit-database', label: 'Permit Database', icon: Globe },
+        { id: 'catering', label: 'Catering Intelligence', icon: Utensils },
+        { id: 'fuel', label: 'Fuel Services', icon: Droplets },
       ]
     },
     {

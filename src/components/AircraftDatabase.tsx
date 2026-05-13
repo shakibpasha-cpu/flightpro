@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Plane, Plus, Trash2, Edit2, Save, X, Fuel, Zap, MapPin, Weight, Loader2, Search, Calendar, Sparkles, History, Clock, FileText, Filter, Users, Activity, SlidersHorizontal } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where, orderBy, Timestamp } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 import { motion, AnimatePresence } from 'motion/react';
 import AircraftPerformanceCharts from './AircraftPerformanceCharts';
 import AircraftComparisonCharts from './AircraftComparisonCharts';
-import { getAircraftDetails } from '../services/aiService';
+import { getAircraftDetails, standardizeAircraftTypes } from '../services/aiService';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
 interface FlightLog {
@@ -58,6 +58,8 @@ interface Aircraft {
   flightHistory?: FlightLog[];
   ai_verified?: boolean;
   last_enhanced?: string;
+  manual_review_needed?: boolean;
+  unmapped_type?: string;
   serviceCeiling?: number;
   // ACMI Specific Fields
   operatorName?: string;
@@ -97,6 +99,7 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
   const [aiFetching, setAiFetching] = useState(false);
   const [enhancingId, setEnhancingId] = useState<string | null>(null);
   const [bulkEnhancing, setBulkEnhancing] = useState(false);
+  const [isStandardizing, setIsStandardizing] = useState(false);
   const [flightHistoryCache, setFlightHistoryCache] = useState<Record<string, FlightLog[]>>({});
   const [loggingFlightId, setLoggingFlightId] = useState<string | null>(null);
   const [logFormData, setLogFormData] = useState<Omit<FlightLog, 'id' | 'aircraft_listing_id'>>({
@@ -858,6 +861,50 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
     alert(`Bulk enhancements complete! Successfully updated ${successCount} aircraft records.`);
   };
 
+  const handleStandardizeTypes = async () => {
+    if (aircraft.length === 0) return;
+    if (!confirm("This will use AI to standardize all aircraft models to their base families (e.g. 'A320-200' -> 'A320'). Continue?")) return;
+
+    setIsStandardizing(true);
+    try {
+      const types = [...new Set(aircraft.map(a => a.type))];
+      const result = await standardizeAircraftTypes(types);
+      
+      let updateCount = 0;
+      let reviewCount = 0;
+
+      for (const a of aircraft) {
+        const standardized = result.mappings[a.type];
+        const isUnmapped = result.unmapped.includes(a.type);
+        
+        if (standardized && standardized !== a.type) {
+          await updateDoc(doc(db, 'aircraft', a.id!), {
+            type: standardized,
+            unmapped_type: isUnmapped ? a.type : null,
+            manual_review_needed: isUnmapped || result.review_needed,
+            last_enhanced: new Date().toISOString()
+          });
+          updateCount++;
+        } else if (isUnmapped) {
+          await updateDoc(doc(db, 'aircraft', a.id!), {
+            manual_review_needed: true,
+            unmapped_type: a.type,
+            last_enhanced: new Date().toISOString()
+          });
+          reviewCount++;
+        }
+      }
+
+      alert(`Standardization complete!\n- Updated: ${updateCount} records\n- Flagged for review: ${reviewCount}`);
+      await fetchAircraft();
+    } catch (error) {
+      console.error("Standardization error:", error);
+      alert("Failed to standardize aircraft types.");
+    } finally {
+      setIsStandardizing(false);
+    }
+  };
+
   const filteredAircraft = aircraft.filter(a => {
     const matchesSearch = 
       a.type.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -891,6 +938,14 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
               {bulkEnhancing ? 'Enhancing...' : 'Fix Missing Specs'}
             </button>
           )}
+          <button
+            onClick={handleStandardizeTypes}
+            disabled={isStandardizing || loading || aircraft.length === 0}
+            className="bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition border border-amber-100 dark:border-amber-800 disabled:opacity-50"
+          >
+            {isStandardizing ? <Loader2 size={18} className="animate-spin" /> : <Filter size={18} />}
+            {isStandardizing ? 'Standardizing...' : 'Standardize Models'}
+          </button>
           <button
             onClick={seedData}
             disabled={loading}
@@ -1571,6 +1626,17 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
                         <Sparkles size={10} />
                         AI Verified
                       </span>
+                    )}
+                    {a.manual_review_needed && (
+                      <div className="flex flex-col gap-1 mt-1">
+                        <span className="text-[10px] bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 px-2 py-0.5 rounded-full uppercase font-bold tracking-widest flex items-center gap-1 w-fit">
+                          <Filter size={10} />
+                          Review Needed
+                        </span>
+                        {a.unmapped_type && (
+                          <p className="text-[8px] text-gray-400 font-bold italic">Original: {a.unmapped_type}</p>
+                        )}
+                      </div>
                     )}
                     {a.icao24 && (
                       <span className="text-[10px] bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 px-2 py-0.5 rounded-full uppercase font-bold tracking-widest">

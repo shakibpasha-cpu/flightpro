@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Globe, Phone, Mail, DollarSign, Plus, Trash2, Edit2, Save, Loader2, Search, Building2, ExternalLink, Sparkles, X } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, query, where, deleteDoc, doc, updateDoc, orderBy } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 import { searchHandlingAgents, getAirportDetails } from '../services/aiService';
 import { motion, AnimatePresence } from 'motion/react';
 

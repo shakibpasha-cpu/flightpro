@@ -4,7 +4,7 @@ import { searchAirports, searchHandlingAgents, getAirportDetails, searchNearbyAi
 import { getLiveWeather, getLiveNotams, MetarData, NotamData } from '../services/weatherService';
 import { db } from '../firebase';
 import { collection, addDoc, query, where, getDocs, limit, doc, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
-import { handleFirestoreError, OperationType } from '../utils/errorHandling';
+import { handleFirestoreError, OperationType } from '../services/errorService';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
