@@ -6,6 +6,8 @@ import { getOperatorDetails } from '../services/aiService';
 import { db } from '../firebase';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../services/errorService';
+import AircraftPerformanceCharts from './AircraftPerformanceCharts';
+import AircraftComparisonCharts from './AircraftComparisonCharts';
 
 interface OperatorProfile {
   operator_name: string;
@@ -48,6 +50,10 @@ interface Aircraft {
   insuranceCoverage?: string;
   operatorDetails?: string;
   crewInfo?: string;
+  monthlyFixedFee?: number;
+  monthlyGuaranteedHours?: number;
+  leaseDepositMonths?: number;
+  minLeaseTermMonths?: number;
   image?: string;
   specs?: {
     engines?: string;
@@ -71,9 +77,20 @@ export default function AircraftDetailPage({ aircraft, onBack, onGenerateQuote, 
   const [loadingAvailability, setLoadingAvailability] = React.useState(false);
   const [operatorProfile, setOperatorProfile] = React.useState<OperatorProfile | null>(null);
   const [loadingOperator, setLoadingOperator] = React.useState(false);
+  const [allAircraft, setAllAircraft] = React.useState<Aircraft[]>([]); // Added
+  const [comparingWith, setComparingWith] = React.useState<Aircraft | null>(null); // Added
   const photos = aircraft.photos || [aircraft.image].filter(Boolean) as string[];
 
   React.useEffect(() => {
+    const fetchAllAircraft = async () => {
+      const q = collection(db, 'aircraft');
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Aircraft));
+      setAllAircraft(data);
+    };
+    
+    fetchAllAircraft();
+    
     const checkAvailability = async () => {
       if (aircraft.id && (aircraft.icao24 || aircraft.registration)) {
         setLoadingAvailability(true);
@@ -231,9 +248,33 @@ export default function AircraftDetailPage({ aircraft, onBack, onGenerateQuote, 
               <SpecItem icon={Maximize} label="Cabin Width" value={aircraft.specs?.cabinWidth || 'N/A'} />
               <SpecItem icon={Weight} label="Baggage" value={aircraft.specs?.baggageCapacity || 'N/A'} />
             </div>
+            
+            <AircraftPerformanceCharts aircraft={aircraft as any} />
+            
+            <div className="pt-8 mt-8 border-t dark:border-gray-700">
+              <h4 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-widest mb-4">Compare Aircraft Performance</h4>
+              <select 
+                className="w-full p-4 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-2xl text-xs font-bold"
+                onChange={(e) => {
+                  const selected = allAircraft.find(a => a.id === e.target.value);
+                  setComparingWith(selected || null);
+                }}
+                value={comparingWith?.id || ''}
+              >
+                <option value="">Select an aircraft to compare...</option>
+                {allAircraft.filter(a => a.id !== aircraft.id).map(a => (
+                  <option key={a.id} value={a.id}>{a.type} ({a.registration})</option>
+                ))}
+              </select>
+              
+              {comparingWith && (
+                <div className="mt-6 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-3xl p-6 shadow-sm">
+                  <AircraftComparisonCharts aircrafts={[aircraft, comparingWith] as any} />
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Operator Details */}
           <div className="bg-white dark:bg-gray-800 p-8 rounded-[2.5rem] border border-gray-100 dark:border-gray-700 shadow-sm space-y-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -402,6 +443,22 @@ export default function AircraftDetailPage({ aircraft, onBack, onGenerateQuote, 
                 <span className="opacity-70">Base Airport</span>
                 <span className="font-bold">{aircraft.baseAirport}</span>
               </div>
+            </div>
+            {/* ACMI Lease Terms */}
+            <div className="h-px bg-white/20" />
+            <div className="space-y-3">
+               <div className="flex items-center justify-between text-xs">
+                  <span className="opacity-70">Monthly Guaranteed Hours</span>
+                  <span className="font-bold">{aircraft.monthlyGuaranteedHours || 'N/A'}</span>
+               </div>
+               <div className="flex items-center justify-between text-xs">
+                  <span className="opacity-70">Lease Deposit (Months)</span>
+                  <span className="font-bold">{aircraft.leaseDepositMonths || 'N/A'}</span>
+               </div>
+               <div className="flex items-center justify-between text-xs">
+                  <span className="opacity-70">Min Lease Term (Months)</span>
+                  <span className="font-bold">{aircraft.minLeaseTermMonths || 'N/A'}</span>
+               </div>
             </div>
           </div>
 

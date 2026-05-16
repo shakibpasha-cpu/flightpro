@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Plane, Plus, Trash2, Edit2, Save, X, Fuel, Zap, MapPin, Weight, Loader2, Search, Calendar, Sparkles, History, Clock, FileText, Filter, Users, Activity, SlidersHorizontal } from 'lucide-react';
+import { Plane, Plus, Trash2, Edit2, Save, X, Fuel, Zap, MapPin, Weight, Loader2, Search, Calendar, Sparkles, History, Clock, FileText, Filter, Users, Activity, SlidersHorizontal, DollarSign } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc, query, where, orderBy, Timestamp } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../services/errorService';
 import { motion, AnimatePresence } from 'motion/react';
 import AircraftPerformanceCharts from './AircraftPerformanceCharts';
 import AircraftComparisonCharts from './AircraftComparisonCharts';
-import { getAircraftDetails, standardizeAircraftTypes } from '../services/aiService';
+import { getAircraftDetails, standardizeAircraftTypes, enhanceAircraftSpecs } from '../services/aiService';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
 interface FlightLog {
@@ -835,30 +835,34 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
 
   const handleBulkEnhanceFleet = async () => {
     if (aircraft.length === 0) return;
-    const candidates = aircraft.filter(a => !a.ai_verified);
+    
+    // Include aircraft already verified but potentially incomplete
+    const candidates = aircraft.filter(a => 
+      !a.ai_verified || 
+      !a.fuelBurnPerHour || !a.cruiseSpeed || !a.maxPayload || 
+      !a.maxPassengers || !a.takeoffDistance || !a.landingDistance || 
+      !a.range || !a.mtow || !a.runwayRequired
+    );
     
     if (candidates.length === 0) {
-      alert("All aircraft in your fleet are already AI-verified and fully detailed!");
+      alert("All aircraft in your fleet appear to be fully detailed!");
       return;
     }
 
-    if (!confirm(`Found ${candidates.length} aircraft missing deep verification. Start bulk enhancement? (This may take a moment)`)) return;
+    if (!confirm(`Found ${candidates.length} aircraft requiring technical validation or enhancement. Start bulk enhancement? (This may take a moment)`)) return;
 
     setBulkEnhancing(true);
-    let successCount = 0;
-    
-    for (const a of candidates) {
-      try {
-        const enhanced = await handleEnhanceAircraft(a, true);
-        if (enhanced) successCount++;
-      } catch (err) {
-        console.error(`Failed to enhance ${a.type}`, err);
-      }
+    try {
+      const results = await enhanceAircraftSpecs(candidates);
+      const successCount = results.filter(r => r.success).length;
+      await fetchAircraft();
+      alert(`Bulk enhancements complete! Successfully updated ${successCount} aircraft records.`);
+    } catch (err) {
+      console.error("Bulk enhancement failed", err);
+      alert("An error occurred during bulk enhancement.");
+    } finally {
+      setBulkEnhancing(false);
     }
-    
-    setBulkEnhancing(false);
-    await fetchAircraft();
-    alert(`Bulk enhancements complete! Successfully updated ${successCount} aircraft records.`);
   };
 
   const handleStandardizeTypes = async () => {
@@ -1777,6 +1781,35 @@ export default function AircraftDatabase({ onViewAvailability }: AircraftDatabas
                 <p className="text-sm font-bold text-gray-700 dark:text-gray-300">${(Number(a.crewCostPerHour) || 0).toLocaleString()}/h</p>
               </div>
             </div>
+
+            {(a.minLeaseTermMonths || a.leaseDepositMonths || a.monthlyGuaranteedHours) && (
+              <div className="mt-4 p-4 bg-indigo-50 dark:bg-indigo-900/10 rounded-2xl border border-indigo-100 dark:border-indigo-800/50 flex flex-wrap gap-6 items-center">
+                 <div className="flex items-center gap-2">
+                   <Calendar size={14} className="text-indigo-600" />
+                   <div>
+                     <p className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Min Lease Term</p>
+                     <p className="text-xs font-black text-indigo-700 dark:text-indigo-300">{a.minLeaseTermMonths || 0} Months</p>
+                   </div>
+                 </div>
+                 <div className="flex items-center gap-2">
+                   <DollarSign size={14} className="text-indigo-600" />
+                   <div>
+                     <p className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Lease Deposit</p>
+                     <p className="text-xs font-black text-indigo-700 dark:text-indigo-300">{a.leaseDepositMonths || 0} Months</p>
+                   </div>
+                 </div>
+                 <div className="flex items-center gap-2">
+                   <Clock size={14} className="text-indigo-600" />
+                   <div>
+                     <p className="text-[8px] font-black text-gray-500 uppercase tracking-widest">Guaranteed Hours</p>
+                     <p className="text-xs font-black text-indigo-700 dark:text-indigo-300">{a.monthlyGuaranteedHours || 0} Hrs/Mo</p>
+                   </div>
+                 </div>
+                 <div className="ml-auto bg-white dark:bg-gray-800 px-3 py-1 rounded-lg border border-indigo-200 dark:border-indigo-700">
+                   <span className="text-[8px] font-black text-indigo-600 uppercase tracking-widest">ACMI Enabled</span>
+                 </div>
+              </div>
+            )}
 
             <div className="mt-6 pt-4 border-t border-gray-50 dark:border-gray-700 flex justify-between items-center">
               <div>

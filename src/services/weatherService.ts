@@ -1,5 +1,5 @@
 import { handleApiError } from './errorService';
-import { getAI, handleAiError, isAiInCooldown } from './aiService';
+import { getAI, handleAiError, isAiInCooldown, safeParseJson } from './aiService';
 
 export interface MetarData {
   airport: string;
@@ -70,7 +70,7 @@ export async function getLiveWeather(icao: string): Promise<MetarData> {
       },
     });
 
-    const data = JSON.parse(response.text);
+    const data = safeParseJson(response.text);
     
     // Update cache
     weatherCache[airportCode] = { data, timestamp: now };
@@ -149,7 +149,7 @@ export async function getLiveNotams(icao: string, filters?: { keyword?: string; 
       },
     });
 
-    const data = JSON.parse(response.text);
+    const data = safeParseJson(response.text);
     
     // Update cache
     notamCache[cacheKey] = { data, timestamp: now };

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Plane, Plus, Trash2, AlertCircle, CheckCircle2, Save, Loader2, ChevronRight, ChevronLeft, Copy, History, Edit2, Zap, Sparkles, Building2, Mail, Phone, DollarSign, X, Globe } from 'lucide-react';
+import { Calendar, Clock, Plane, Plus, Trash2, AlertCircle, CheckCircle2, Save, Loader2, ChevronRight, ChevronLeft, Copy, History, Edit2, Zap, Sparkles, Building2, Mail, Phone, DollarSign, X, Globe, Shield } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, query, where, orderBy, Timestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../services/errorService';
 import { motion, AnimatePresence } from 'motion/react';
-import { optimizeFlightSchedule, getAirportCoords, searchHandlingAgents, getAirportDetails } from '../services/aiService';
+import { optimizeFlightSchedule, getAirportCoords, searchHandlingAgents, getAirportDetails, analyzeCrewScheduleConflicts } from '../services/aiService';
 
 interface Flight {
   departure: string;
@@ -92,6 +92,8 @@ export default function ScheduleBuilder() {
   const [availableAgents, setAvailableAgents] = useState<any[]>([]);
   const [fetchingAgents, setFetchingAgents] = useState(false);
   const [agentCounts, setAgentCounts] = useState<Record<string, number>>({});
+  const [crewConflicts, setCrewConflicts] = useState<Record<string, any>>({});
+  const [checkingConflicts, setCheckingConflicts] = useState<string | null>(null);
 
   const DUTY_LIMIT_HOURS = 14;
   const MIN_TURNAROUND_MINUTES = 45;
@@ -514,6 +516,46 @@ export default function ScheduleBuilder() {
 
   const totalDuty = calculateTotalDuty();
   
+  const handleCheckCrewConflicts = async (crewId: string) => {
+    const crewMember = crewList.find(c => c.id === crewId);
+    if (!crewMember) return;
+
+    setCheckingConflicts(crewId);
+    try {
+      // 1. Fetch historical logs (last 28 days)
+      const logsQuery = query(
+        collection(db, 'duty_logs'),
+        where('crewMemberId', '==', crewId),
+        orderBy('startTime', 'desc')
+      );
+      const logsSnap = await getDocs(logsQuery);
+      const logs = logsSnap.docs.map(d => d.data());
+
+      // 2. Fetch existing schedules
+      const schedulesQuery = query(
+        collection(db, 'schedules'),
+        where('crewIds', 'array-contains', crewId)
+      );
+      const schedulesSnap = await getDocs(schedulesQuery);
+      const existing = schedulesSnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(s => s.id !== editingId);
+
+      // 3. Define the proposed schedule
+      const proposed = {
+        date: selectedDate,
+        flights: flights.filter(f => f.crewIds?.includes(crewId))
+      };
+
+      const result = await analyzeCrewScheduleConflicts(crewMember, proposed, logs, existing);
+      setCrewConflicts(prev => ({ ...prev, [crewId]: result }));
+    } catch (error) {
+      console.error('Error checking crew conflicts:', error);
+    } finally {
+      setCheckingConflicts(null);
+    }
+  };
+
   // Check if any assigned crew member exceeds the limit
   const maxCrewDuty = selectedCrew.length > 0 
     ? Math.max(...selectedCrew.map(id => calculateCrewDutyTime(id, flights)))
@@ -545,6 +587,14 @@ export default function ScheduleBuilder() {
       if (dutyTime > DUTY_LIMIT_HOURS) {
         const crewMember = crewList.find(c => c.id === crewId);
         alert(`${crewMember?.name}'s total duty time (${dutyTime.toFixed(1)}h) exceeds the limit of ${DUTY_LIMIT_HOURS}h.`);
+        return;
+      }
+
+      // Check AI-found conflicts
+      const conflictData = crewConflicts[crewId];
+      if (conflictData?.hasConflicts && conflictData.conflicts.some((c: any) => c.severity === 'Critical')) {
+        const crewMember = crewList.find(c => c.id === crewId);
+        alert(`Critical ICAO conflict detected for ${crewMember?.name}. Please resolve before publishing.`);
         return;
       }
     }
@@ -766,6 +816,20 @@ export default function ScheduleBuilder() {
                     {optimizing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                     Optimize Schedule
                   </button>
+                  {selectedCrew.length > 0 && (
+                    <button 
+                      onClick={async () => {
+                        for (const crewId of selectedCrew) {
+                          await handleCheckCrewConflicts(crewId);
+                        }
+                      }}
+                      disabled={loading || flights.length === 0}
+                      className="text-xs font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1 hover:underline disabled:opacity-50"
+                    >
+                      <Shield size={14} />
+                      Scan All Crew Conflicts
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1194,20 +1258,33 @@ export default function ScheduleBuilder() {
                       const isAssigned = selectedCrew.includes(crew.id);
                       const dutyTime = calculateCrewDutyTime(crew.id, flights);
                       const isOver = dutyTime > DUTY_LIMIT_HOURS;
+                      const conflictData = crewConflicts[crew.id];
 
                       return (
                         <div
                           key={crew.id}
-                          className={`p-3 rounded-xl border text-left transition-all ${
+                          className={`p-3 rounded-xl border text-left transition-all relative ${
                             isAssigned
-                              ? isOver 
+                              ? isOver || conflictData?.hasConflicts
                                 ? 'border-red-600 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
                                 : 'border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-400'
                               : 'border-gray-100 dark:border-gray-700 opacity-50'
                           }`}
                         >
                           <div className="flex justify-between items-start mb-1">
-                            <p className="text-sm font-bold">{crew.name}</p>
+                            <div>
+                               <p className="text-sm font-bold">{crew.name}</p>
+                               {isAssigned && (
+                                  <button 
+                                     onClick={() => handleCheckCrewConflicts(crew.id)}
+                                     disabled={checkingConflicts === crew.id}
+                                     className="text-[8px] font-black uppercase tracking-tighter text-indigo-600 dark:text-indigo-400 flex items-center gap-1 hover:underline disabled:opacity-50"
+                                  >
+                                     {checkingConflicts === crew.id ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                                     {conflictData ? 'Rescan Conflicts' : 'Scan Conflicts'}
+                                  </button>
+                               )}
+                            </div>
                             <div className="flex items-center gap-1">
                               <span className={`w-2 h-2 rounded-full ${
                                 crew.status === 'Available' ? 'bg-emerald-500' :
@@ -1217,7 +1294,26 @@ export default function ScheduleBuilder() {
                               <span className="text-[9px] font-bold uppercase tracking-tighter opacity-70">{crew.status}</span>
                             </div>
                           </div>
-                          <div className="flex justify-between items-end">
+                          
+                          {isAssigned && conflictData && (
+                             <div className="mt-2 space-y-1">
+                                {conflictData.hasConflicts ? (
+                                   conflictData.conflicts.map((c: any, ci: number) => (
+                                      <div key={ci} className="flex gap-1 items-start text-[8px] text-red-600 dark:text-red-400 leading-tight">
+                                         <AlertCircle size={10} className="shrink-0 mt-0.5" />
+                                         <p><span className="font-black">[{c.type}]</span> {c.message}</p>
+                                      </div>
+                                   ))
+                                ) : (
+                                   <div className="flex gap-1 items-center text-[8px] text-emerald-600 dark:text-emerald-400">
+                                      <CheckCircle2 size={10} />
+                                      <span>ICAO Compliant</span>
+                                   </div>
+                                )}
+                             </div>
+                          )}
+
+                          <div className="flex justify-between items-end mt-2">
                             <p className="text-[10px] opacity-60 font-bold uppercase">{crew.role}</p>
                             {isAssigned && (
                               <div className="text-right">

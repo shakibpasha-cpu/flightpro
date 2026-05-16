@@ -1,5 +1,5 @@
 import { Type } from "@google/genai";
-import { getAI, handleAiError, isAiInCooldown } from "./aiService";
+import { getAI, handleAiError, isAiInCooldown, safeParseJson } from "./aiService";
 import { safeStringify } from "../utils/safeJson";
 
 export interface AIPrediction {
@@ -91,7 +91,7 @@ export async function predictAircraftAvailability(
       }
     });
 
-    const result = JSON.parse(response.text) as AIPrediction;
+    const result = safeParseJson(response.text) as AIPrediction;
     
     // Update cache
     predictionCache[cacheKey] = { data: result, timestamp: now };

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Sparkles, Loader2, Plane, MapPin, DollarSign, Fuel, Info, AlertTriangle, Zap, Lightbulb, ShieldAlert, Cloud, FileText, Globe, ChevronDown, ChevronUp, ChevronRight, Users, Settings, Download, Calendar, ShieldCheck, Tag, Clock, Activity, Route, ListOrdered } from 'lucide-react';
-import { planComplexFlight, analyzeFlightPlan, getFIRDetails, searchHandlingAgents, getPermitDetails, getOptimizationAlternatives, getAirportDetails, suggestFuelStop, analyzePermits, getAirportFIR, getLegFIRAnalysis } from '../services/aiService';
+import { Sparkles, Loader2, Plane, MapPin, DollarSign, Fuel, Info, AlertTriangle, Zap, Lightbulb, ShieldAlert, Cloud, FileText, Globe, ChevronDown, ChevronUp, ChevronRight, Users, Settings, Download, Calendar, ShieldCheck, Tag, Clock, Activity, Route, ListOrdered, Building2, Mail, Phone } from 'lucide-react';
+import { planComplexFlight, analyzeFlightPlan, analyzeFlightPlanRisks, getFIRDetails, searchHandlingAgents, getPermitDetails, getOptimizationAlternatives, getAirportDetails, suggestFuelStop, analyzePermits, getAirportFIR, getLegFIRAnalysis, checkCrewCompliance } from '../services/aiService';
 
 import { motion, AnimatePresence } from 'motion/react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend as RechartsLegend } from 'recharts';
@@ -28,7 +28,7 @@ interface AIPlannerProps {
   setActiveMapInput?: (input: 'departure' | 'destination' | 'none') => void;
 }
 
-type TabType = 'itinerary' | 'fuel' | 'costing' | 'permits' | 'handling' | 'optimization' | 'fir' | 'crew' | 'ai-analysis';
+type TabType = 'itinerary' | 'fuel' | 'costing' | 'permits' | 'handling' | 'optimization' | 'fir' | 'crew' | 'ai-analysis' | 'risks';
 
 const LegCard = ({ 
   leg, 
@@ -36,6 +36,7 @@ const LegCard = ({
   onHover, 
   onNoteChange, 
   onAssignCrew, 
+  onSelectAgent,
   crewList, 
   suggestedAircraftDetails, 
   setActiveTab, 
@@ -292,12 +293,25 @@ const LegCard = ({
                     {/* Crew Integration Section */}
                     <div className="pt-4">
                        <div className="flex items-center justify-between mb-3 px-1">
-                          <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2">
-                            <Users size={12} /> MISSION CREW ASSIGNMENT
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <Users size={12} className="text-gray-400" />
+                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                              MISSION CREW ASSIGNMENT
+                            </p>
+                            {leg.crewComplianceScore && (
+                              <div className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest border ${
+                                leg.crewComplianceScore === 'Green' ? 'bg-emerald-50 border-emerald-200 text-emerald-600' :
+                                leg.crewComplianceScore === 'Yellow' ? 'bg-amber-50 border-amber-200 text-amber-600' :
+                                'bg-rose-50 border-rose-200 text-rose-600'
+                              }`}>
+                                FTL: {leg.crewComplianceScore}
+                              </div>
+                            )}
+                          </div>
                           <button onClick={() => setActiveTab('crew')} className="text-[9px] font-bold text-indigo-600 hover:underline">Manage All</button>
                        </div>
-                       <div className="flex flex-wrap gap-2">
+                       
+                       <div className="flex flex-wrap gap-2 mb-3">
                          {crewList.map((member: any) => {
                            const isAssigned = (leg.crewAssignments || []).some((c: any) => c.id === member.id);
                            return (
@@ -315,6 +329,30 @@ const LegCard = ({
                            );
                          })}
                        </div>
+
+                       {leg.crewJustification && (
+                         <div className="p-3 bg-indigo-50/50 dark:bg-indigo-900/15 rounded-2xl border border-indigo-100 dark:border-indigo-800/50">
+                           <div className="flex items-center gap-1.5 mb-1">
+                             <Lightbulb size={10} className="text-indigo-500" />
+                             <span className="text-[8px] font-black text-indigo-500 uppercase tracking-widest">AI Assignment Rationale</span>
+                           </div>
+                           <p className="text-[9px] text-gray-600 dark:text-gray-400 italic leading-tight">
+                             {leg.crewJustification}
+                           </p>
+                         </div>
+                       )}
+
+                       {leg.crewComplianceWarning && (
+                         <div className="p-3 mt-2 bg-rose-50/50 dark:bg-rose-900/15 rounded-2xl border border-rose-100 dark:border-rose-800/50">
+                           <div className="flex items-center gap-1.5 mb-1">
+                             <ShieldAlert size={10} className="text-rose-500" />
+                             <span className="text-[8px] font-black text-rose-500 uppercase tracking-widest">Duty Time Warning</span>
+                           </div>
+                           <p className="text-[9px] text-rose-700 dark:text-rose-300 italic leading-tight">
+                             {leg.crewComplianceWarning}
+                           </p>
+                         </div>
+                       )}
                     </div>
                   </div>
                 </div>
@@ -322,6 +360,34 @@ const LegCard = ({
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Special Top 3 Handling Agents Suggestion for EGLL-KJFK */}
+        {(leg.departure === 'EGLL' && leg.destination === 'KJFK') && (leg.handlingAgents && leg.handlingAgents.length > 0) && (
+          <div className="mt-8 p-6 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-3xl text-white shadow-xl shadow-indigo-100 dark:shadow-none border border-white/10 relative overflow-hidden group">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-32 -mt-32 blur-3xl opacity-20" />
+            <div className="relative z-10">
+              <div className="flex items-center gap-3 mb-6">
+                <Sparkles size={20} className="text-white" />
+                <div>
+                  <h4 className="text-sm font-black uppercase tracking-tight">Top 3 Destination Handlers</h4>
+                  <p className="text-[9px] font-bold uppercase opacity-60 tracking-widest">Strategic Selections: EGLL → KJFK</p>
+                </div>
+                <div className="ml-auto bg-emerald-500 text-white text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest">
+                  AI Verified
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {leg.handlingAgents.slice(0, 3).map((agent: any, aIdx: number) => (
+                  <div key={aIdx} className="p-3 bg-white/10 rounded-2xl border border-white/10 hover:bg-white/20 transition-all cursor-pointer" onClick={() => onSelectAgent(idx, agent, 'destination')}>
+                    <h5 className="text-[10px] font-black truncate mb-1">{agent.companyName}</h5>
+                    <p className="text-[12px] font-black">${agent.baseFee?.toLocaleString()}</p>
+                    <button className="mt-2 w-full py-1 text-[8px] font-black uppercase bg-white text-indigo-700 rounded-lg">Assign</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </motion.div>
   );
@@ -332,7 +398,9 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
   const [loading, setLoading] = useState(false);
   const [missionType, setMissionType] = useState<'Passenger' | 'Cargo' | 'VIP' | 'ACMI Lease'>('Passenger');
   const [analysis, setAnalysis] = useState<any>(null);
+  const [riskAnalysis, setRiskAnalysis] = useState<any>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analyzingRisks, setAnalyzingRisks] = useState(false);
   const [optimization, setOptimization] = useState<'cheapest' | 'fastest' | 'balanced' | 'fuel-efficient'>('balanced');
   const [activeTab, setActiveTab] = useState<TabType>('itinerary');
   const [hoveredLegIndex, setHoveredLegIndex] = useState<number | null>(null);
@@ -426,9 +494,12 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
   const [isAnalyzingPermits, setIsAnalyzingPermits] = useState(false);
   const [isRunningAnalysis, setIsRunningAnalysis] = useState(false);
   const [crewList, setCrewList] = useState<CrewMember[]>([]);
+  const [allDutyLogs, setAllDutyLogs] = useState<any[]>([]);
   const [loadingCrew, setLoadingCrew] = useState(false);
+  const [isAutoAssigningCrew, setIsAutoAssigningCrew] = useState(false);
 
   const [hasAnalyzedPermits, setHasAnalyzedPermits] = useState(false);
+  const [hasAnalyzedRisks, setHasAnalyzedRisks] = useState(false);
 
   const uniqueAircraftTypes = useMemo(() => {
     if (!aircraftList) return [];
@@ -490,24 +561,68 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
     setHasAnalyzedPermits(false);
   }, [plan?.suggestedAircraft, plan?.legs?.length]);
 
+  // Trigger risk analysis when entering the risks tab
+  React.useEffect(() => {
+    if (activeTab === 'risks' && !hasAnalyzedRisks && plan && plan.legs.length > 0) {
+      handleAnalyzeRisks();
+      setHasAnalyzedRisks(true);
+    }
+  }, [activeTab, plan]);
+
+  // Reset risk analysis flag when plan changes significantly
+  React.useEffect(() => {
+    setHasAnalyzedRisks(false);
+  }, [plan?.suggestedAircraft, plan?.legs?.length]);
+
   useEffect(() => {
-    const fetchCrew = async () => {
+    const fetchData = async () => {
       setLoadingCrew(true);
       try {
-        const q = query(collection(db, 'crew_members'), orderBy('name'));
-        const snapshot = await getDocs(q);
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CrewMember));
-        setCrewList(data);
+        const crewQ = query(collection(db, 'crew_members'), orderBy('name'));
+        const crewSnapshot = await getDocs(crewQ);
+        const crewData = crewSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as CrewMember));
+        setCrewList(crewData);
+
+        const logsSnapshot = await getDocs(collection(db, 'duty_logs'));
+        const logsData = logsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setAllDutyLogs(logsData);
       } catch (error) {
-        console.error('Error fetching crew:', error);
+        console.error('Error fetching data:', error);
       } finally {
         setLoadingCrew(false);
       }
     };
-    fetchCrew();
+    fetchData();
   }, []);
 
-  const handleAssignCrew = (legIdx: number, crewMember: CrewMember) => {
+  const handleAutoAssignCrew = async () => {
+    if (!plan || crewList.length === 0) return;
+    setIsAutoAssigningCrew(true);
+    try {
+      const { suggestCrewForMission } = await import('../services/aiService');
+      const result = await suggestCrewForMission(plan, crewList, allDutyLogs);
+      
+      if (result && result.assignedCrew) {
+        const newLegs = [...plan.legs];
+        result.assignedCrew.forEach((assignment: any) => {
+          if (newLegs[assignment.legIndex]) {
+            const assignedMembers = crewList.filter(c => assignment.crewIds.includes(c.id));
+            newLegs[assignment.legIndex].crewAssignments = assignedMembers;
+            newLegs[assignment.legIndex].crewJustification = assignment.justification;
+            newLegs[assignment.legIndex].crewComplianceScore = assignment.complianceScore;
+          }
+        });
+        onPlanChange({ ...plan, legs: newLegs, crewSafetyBrief: result.overallSafetyBrief });
+      }
+    } catch (error) {
+      console.error('Auto-assign crew error:', error);
+      alert('Failed to automatically assign crew. Please try manual assignment.');
+    } finally {
+      setIsAutoAssigningCrew(false);
+    }
+  };
+
+  const handleAssignCrew = async (legIdx: number, crewMember: CrewMember) => {
     if (!plan) return;
     const newLegs = [...plan.legs];
     const currentAssignments = newLegs[legIdx].crewAssignments || [];
@@ -515,8 +630,26 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
     // Check if already assigned
     if (currentAssignments.some((c: any) => c.id === crewMember.id)) {
       newLegs[legIdx].crewAssignments = currentAssignments.filter((c: any) => c.id !== crewMember.id);
+      newLegs[legIdx].crewComplianceWarning = null;
     } else {
       newLegs[legIdx].crewAssignments = [...currentAssignments, crewMember];
+      
+      // Perform compliance check for the new assignment
+      try {
+        const compliance = await checkCrewCompliance(
+          crewMember, 
+          allDutyLogs.filter(log => log.crewId === crewMember.id)
+        );
+        
+        if (compliance && compliance.status !== 'Green') {
+          alert(`Warning: Duty time limit issue for ${crewMember.name}: ${compliance.summary}`);
+          newLegs[legIdx].crewComplianceWarning = compliance.summary;
+        } else {
+          newLegs[legIdx].crewComplianceWarning = null;
+        }
+      } catch (err) {
+        console.error("Compliance check failed", err);
+      }
     }
     
     onPlanChange({ ...plan, legs: newLegs });
@@ -943,6 +1076,23 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
     }
   };
 
+  const handleAnalyzeRisks = async () => {
+    if (!plan) return;
+    setAnalyzingRisks(true);
+    setQuotaError(false);
+    try {
+      const result = await analyzeFlightPlanRisks(plan);
+      setRiskAnalysis(result);
+    } catch (error) {
+      console.error('Risk Analysis Error:', error);
+      if (error instanceof Error && (error.message.includes('Quota') || error.message.includes('429'))) {
+        setQuotaError(true);
+      }
+    } finally {
+      setAnalyzingRisks(false);
+    }
+  };
+
   const handleRunAnalysis = async () => {
     if (!plan) return;
     setIsRunningAnalysis(true);
@@ -1197,6 +1347,8 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
       }
 
       onPlanChange(result);
+      setAnalysis(null);
+      setRiskAnalysis(null);
       
       if (result.isFallback) {
         setQuotaError(true);
@@ -1734,6 +1886,7 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
               { id: 'crew', label: 'Crew', icon: Users },
               { id: 'optimization', label: 'Optimization', icon: Zap },
               { id: 'ai-analysis', label: 'AI Analysis', icon: Sparkles },
+              { id: 'risks', label: 'Risk Analysis', icon: ShieldAlert },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -1785,6 +1938,14 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
                           {loading ? <Loader2 className="animate-spin" size={12} /> : <Activity size={12} />}
                           <span>Sync Leg Analytics</span>
                         </button>
+                        <button
+                          onClick={handleAutoAssignCrew}
+                          disabled={loading || isAutoAssigningCrew}
+                          className="flex items-center gap-2 px-4 py-2 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-purple-100 transition-all border border-purple-100 dark:border-purple-800"
+                        >
+                          {isAutoAssigningCrew ? <Loader2 className="animate-spin" size={12} /> : <Sparkles size={12} />}
+                          <span>Auto-Assign AI Crew</span>
+                        </button>
                       </div>
                     </div>
                     
@@ -1800,7 +1961,8 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
                           onHover={onHoverLeg}
                           onNoteChange={handleLegNoteChange}
                           onAssignCrew={handleAssignCrew}
-                          crewList={crewList}
+                          onSelectAgent={handleSelectAgent}
+                    crewList={crewList}
                           suggestedAircraftDetails={suggestedAircraftDetails}
                           setActiveTab={setActiveTab}
                           handleSuggestStops={handleSuggestStops}
@@ -2047,7 +2209,7 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
 
               {activeTab === 'crew' && (
                 <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
-                  <CrewManagement />
+                  <CrewManagement proposedPlan={plan} />
                 </div>
               )}
 
@@ -2116,6 +2278,92 @@ export default function AIPlanner({ aircraftList, plan, onPlanChange, onHoverLeg
                       </div>
 
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'risks' && (
+                <div className="space-y-6">
+                  <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm">
+                    <div className="flex justify-between items-center mb-6">
+                      <div className="flex items-center gap-2">
+                        <ShieldAlert size={20} className="text-red-600 dark:text-red-400" />
+                        <h3 className="text-lg font-black text-gray-900 dark:text-white">Deeper Risk Analysis</h3>
+                      </div>
+                      <button 
+                        onClick={handleAnalyzeRisks}
+                        disabled={analyzingRisks}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-xl text-xs font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-200 dark:shadow-none disabled:opacity-50"
+                      >
+                        {analyzingRisks ? <Loader2 className="animate-spin" size={16} /> : <Activity size={16} />}
+                        Re-Analyze Risks
+                      </button>
+                    </div>
+
+                    {analyzingRisks ? (
+                      <div className="flex flex-col items-center justify-center py-12 gap-4">
+                        <Loader2 className="animate-spin text-red-600" size={32} />
+                        <p className="text-sm font-bold text-gray-400 uppercase tracking-widest text-center">AI is scanning en-route FIRs, Restricted Airspaces,<br />and Extended Range (ETOPS) Operational safety...</p>
+                      </div>
+                    ) : riskAnalysis ? (
+                      <div className="space-y-6">
+                        <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800">
+                          <p className="text-sm text-gray-700 dark:text-gray-300 font-medium leading-relaxed italic">"{riskAnalysis.summary}"</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {riskAnalysis.risks?.map((r: any, i: number) => (
+                            <div key={i} className="p-5 rounded-2xl border transition-all hover:shadow-lg dark:hover:shadow-none space-y-3 bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700">
+                              <div className="flex justify-between items-start">
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
+                                      r.category === 'ETOPS' ? 'bg-indigo-100 text-indigo-600' :
+                                      r.category === 'FIR Charges' ? 'bg-amber-100 text-amber-600' :
+                                      r.category === 'Airspace' ? 'bg-red-100 text-red-600' :
+                                      'bg-emerald-100 text-emerald-600'
+                                    }`}>
+                                      {r.category}
+                                    </span>
+                                    <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
+                                      r.severity === 'High' ? 'bg-red-600 text-white' :
+                                      r.severity === 'Medium' ? 'bg-amber-500 text-white' :
+                                      'bg-emerald-500 text-white'
+                                    }`}>
+                                      {r.severity}
+                                    </span>
+                                  </div>
+                                  <h4 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-tight">{r.title}</h4>
+                                </div>
+                                <ShieldAlert size={18} className={r.severity === 'High' ? 'text-red-600' : r.severity === 'Medium' ? 'text-amber-500' : 'text-emerald-500'} />
+                              </div>
+                              
+                              <p className="text-xs text-gray-600 dark:text-gray-400 font-medium leading-relaxed">{r.description}</p>
+                              
+                              <div className="pt-2">
+                                <div className="flex items-center gap-2 mb-1.5">
+                                  <ShieldCheck size={12} className="text-emerald-500" />
+                                  <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">Recommended Mitigation</p>
+                                </div>
+                                <p className="text-[10px] text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/50 p-2 rounded-lg border border-gray-100 dark:border-gray-800">
+                                  {r.mitigation}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-12 gap-4 text-center">
+                        <div className="w-16 h-16 bg-gray-50 dark:bg-gray-900 rounded-full flex items-center justify-center text-gray-300 dark:text-gray-700">
+                          <ShieldAlert size={32} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-gray-500 dark:text-gray-400">No risk analysis data yet</p>
+                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1 max-w-xs">Click the button above to run a deep strategic risk assessment for this flight plan.</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

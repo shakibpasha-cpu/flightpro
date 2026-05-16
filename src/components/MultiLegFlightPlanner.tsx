@@ -163,7 +163,25 @@ export default function MultiLegFlightPlanner() {
 
   const [analyzingOptimization, setAnalyzingOptimization] = useState(false);
   const [optimizationData, setOptimizationData] = useState<any>(null);
-  const [showOptimizationPanel, setShowOptimizationPanel] = useState(false);
+  const [showRouteAgentsPanel, setShowRouteAgentsPanel] = useState(false);
+  const [routeAgents, setRouteAgents] = useState<{EGLL: any[], KJFK: any[]}>({EGLL: [], KJFK: []});
+
+  const fetchRouteAgents = async () => {
+    try {
+        const [egll, kjfk] = await Promise.all([
+           searchHandlingAgents('EGLL'),
+           searchHandlingAgents('KJFK')
+        ]);
+        setRouteAgents({
+           EGLL: (egll.agents || []).slice(0, 3),
+           KJFK: (kjfk.agents || []).slice(0, 3)
+        });
+        setShowRouteAgentsPanel(true);
+        showNotification("Fetched top 3 handling agents for EGLL and KJFK", "success");
+    } catch (e) {
+        handleError(e, "fetching route agents");
+    }
+  };
 
   useEffect(() => {
     // Dynamic import to avoid circular dependency or load issues
@@ -329,6 +347,23 @@ export default function MultiLegFlightPlanner() {
       handleError(error, "agent enrichment");
     } finally {
       setEnrichingLegIndex(null);
+    }
+  };
+
+  const handleSearchAgentsByAircraft = async (index: number, icao: string, aircraftType: string) => {
+    setEnrichingLegIndex(index);
+    try {
+        const result = await searchHandlingAgents(icao, undefined, undefined, aircraftType, true);
+        if (result && result.agents) {
+            setAirportHandling(prev => ({ ...prev, [icao]: result }));
+            showNotification(`Updated agent list for ${aircraftType} at ${icao}`, "success");
+        } else {
+            showNotification(`No agents found for ${aircraftType} at ${icao}`, "info");
+        }
+    } catch (error) {
+        handleError(error, "searching handling agents");
+    } finally {
+        setEnrichingLegIndex(null);
     }
   };
 
@@ -721,7 +756,7 @@ export default function MultiLegFlightPlanner() {
     }
 
     setAnalyzingOptimization(true);
-    setShowOptimizationPanel(true);
+    // setShowOptimizationPanel(true);
 
     try {
       const { getOptimizedRoute } = await import('../services/aiService');
@@ -1237,6 +1272,18 @@ export default function MultiLegFlightPlanner() {
                 </div>
               )}
             </div>
+            <button
+              onClick={() => handleSearchAgentsByAircraft(index, leg.to, leg.aircraftType)}
+              disabled={enrichingLegIndex === index}
+              className={`flex items-center gap-2.5 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all transform active:scale-95 shadow-sm ${
+                enrichingLegIndex === index
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-200 dark:shadow-none'
+              }`}
+            >
+              <Search size={12} />
+              Search for {leg.aircraftType}
+            </button>
             <button
               onClick={() => handleEnrichAgent(index)}
               disabled={enrichingLegIndex === index}
@@ -3109,7 +3156,7 @@ export default function MultiLegFlightPlanner() {
                     </motion.div>
                   )}
 
-                  {showOptimizationPanel && (
+                  {showRouteAgentsPanel && (
                     <motion.div
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -3122,7 +3169,7 @@ export default function MultiLegFlightPlanner() {
                           <h3 className="text-sm font-black text-emerald-900 dark:text-emerald-400 uppercase tracking-widest">Route Fuel Efficiency Optimizer</h3>
                         </div>
                         <button 
-                          onClick={() => setShowOptimizationPanel(false)}
+                          onClick={() => setShowRouteAgentsPanel(false)}
                           className="text-emerald-600 hover:text-emerald-800 text-[10px] font-bold uppercase"
                         >
                           Close
@@ -3231,9 +3278,40 @@ export default function MultiLegFlightPlanner() {
                           >
                             Analyze Fuel Efficiency
                           </button>
+                           <button 
+                            onClick={fetchRouteAgents}
+                            className="bg-fuchsia-600 text-white px-8 py-3 ml-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-fuchsia-200 dark:shadow-none hover:bg-fuchsia-700 transition-all"
+                          >
+                            Top Agents (EGLL/KJFK)
+                          </button>
                         </div>
                       )}
                     </motion.div>
+                  )}
+
+                  {showRouteAgentsPanel && (
+                    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                      <div className="bg-white dark:bg-gray-950 p-8 rounded-[2.5rem] w-full max-w-4xl shadow-2xl border border-gray-200 dark:border-gray-800">
+                        <div className="flex justify-between items-center mb-6">
+                          <h2 className="text-xl font-black uppercase tracking-tight text-gray-900 dark:text-white">Handling Agents: EGLL & KJFK</h2>
+                          <button onClick={() => setShowRouteAgentsPanel(false)} className="p-2 bg-gray-100 dark:bg-gray-900 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 text-gray-500"><X size={20}/></button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-8">
+                           <div className="bg-gray-50 dark:bg-gray-900 p-6 rounded-3xl border border-gray-100 dark:border-gray-800">
+                               <h3 className="text-sm font-black mb-4 uppercase text-indigo-500">EGLL Departure</h3>
+                               <div className="space-y-3">
+                                {routeAgents.EGLL.map((agent, i) => <div key={i} className="p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm text-sm font-bold text-gray-700 dark:text-gray-200">{agent.companyName}</div>)}
+                               </div>
+                           </div>
+                           <div className="bg-gray-50 dark:bg-gray-900 p-6 rounded-3xl border border-gray-100 dark:border-gray-800">
+                               <h3 className="text-sm font-black mb-4 uppercase text-emerald-500">KJFK Destination</h3>
+                               <div className="space-y-3">
+                               {routeAgents.KJFK.map((agent, i) => <div key={i} className="p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm text-sm font-bold text-gray-700 dark:text-gray-200">{agent.companyName}</div>)}
+                               </div>
+                           </div>
+                        </div>
+                      </div>
+                    </div>
                   )}
 
                   {showTechPanel && (

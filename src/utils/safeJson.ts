@@ -49,8 +49,10 @@ export function safeStringify(obj: any, indent: number | string = 2): string {
     for (const key in val) {
       if (Object.prototype.hasOwnProperty.call(val, key)) {
         // Skip common circular keys in events or library objects
-        if (key === 'srcElement' || key === 'target' || key === 'view' || key === 'parentElement') {
-          // Add basic summary instead of deep dive if it looks suspicious
+        const suspiciousKeys = ['srcElement', 'target', 'view', 'parentElement', 'src', 'i'];
+        if (suspiciousKeys.includes(key)) {
+          result[key] = `[Suspicious Key: ${key}]`;
+          continue;
         }
         result[key] = cleanObject(val[key]);
       }

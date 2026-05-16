@@ -1,6 +1,6 @@
 import { db } from '../firebase';
 import { collection, doc, getDoc, getDocs, query, where, limit } from 'firebase/firestore';
-import { getFlightRouteDetails, getAI, handleAiError } from './aiService';
+import { getFlightRouteDetails, getAI, handleAiError, safeParseJson } from './aiService';
 import { Type } from "@google/genai";
 import { REAL_WORLD_ACMI_RATES } from '../constants/aircraftData';
 import { 
@@ -177,7 +177,7 @@ async function estimatePricingFactors(params: MissionParams, aircraftType: strin
       },
     });
 
-    const result = JSON.parse(response.text);
+    const result = safeParseJson(response.text);
     
     // Clamp values to user-defined ranges
     const clamp = (val: number, min: number, max: number) => Math.min(Math.max(val, min), max);
@@ -621,7 +621,7 @@ export async function predictACMILeaseRate(params: {
     });
 
     const jsonStr = response.text?.trim() || "{}";
-    return JSON.parse(jsonStr);
+    return safeParseJson(jsonStr);
   } catch (error) {
     handleAiError(error, 'predictACMILeaseRate');
     throw error;

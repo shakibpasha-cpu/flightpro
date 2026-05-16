@@ -18,12 +18,20 @@ import {
   ChevronRight,
   ExternalLink,
   Loader2,
-  Trash2
+  Trash2,
+  Wine,
+  ChefHat,
+  Clock3,
+  Users2,
+  PlaneTakeoff,
+  DollarSign,
+  Coffee,
+  Info
 } from 'lucide-react';
 import { db } from '../firebase';
 import { collection, addDoc, getDocs, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../services/errorService';
-import { getCateringProvidersForAirport } from '../services/aiService';
+import { getCateringProvidersForAirport, generateCateringIntelligence } from '../services/aiService';
 
 interface CateringProvider {
   id: string;
@@ -52,6 +60,36 @@ export default function CateringDatabase() {
   const [isEnriching, setIsEnriching] = useState(false);
   const [enrichmentAirport, setEnrichmentAirport] = useState('');
   const [enrichmentResults, setEnrichmentResults] = useState<any[]>([]);
+  const [intelLoading, setIntelLoading] = useState(false);
+  const [cateringIntel, setCateringIntel] = useState<any>(null);
+  const [selectedTierIndex, setSelectedTierIndex] = useState(0);
+  const [intelForm, setIntelForm] = useState({
+    departure: '',
+    arrival: '',
+    pax: 4,
+    duration: 3.5,
+    aircraft: 'G650'
+  });
+
+  const handleGenerateIntel = async () => {
+    if (!intelForm.departure || !intelForm.arrival) return;
+    setIntelLoading(true);
+    try {
+      const result = await generateCateringIntelligence(
+        intelForm.departure,
+        intelForm.arrival,
+        intelForm.pax,
+        intelForm.duration,
+        intelForm.aircraft
+      );
+      setCateringIntel(result);
+      setSelectedTierIndex(0); 
+    } catch (error) {
+      console.error("Intel generation failed", error);
+    } finally {
+      setIntelLoading(false);
+    }
+  };
 
   const handleAIEnrich = async () => {
     if (!enrichmentAirport || enrichmentAirport.length < 3) return;
@@ -204,67 +242,309 @@ export default function CateringDatabase() {
         </button>
       </div>
 
-      <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-8 rounded-[2rem] text-white shadow-xl shadow-indigo-200 dark:shadow-none relative overflow-hidden group">
-        <Sparkles className="absolute right-[-20px] top-[-20px] w-64 h-64 text-white/5 group-hover:rotate-12 transition-transform duration-1000" />
-        <div className="relative z-10 max-w-2xl">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 bg-white/20 rounded-xl">
-                <Sparkles size={24} className="text-white" />
+      <div className="bg-gradient-to-br from-indigo-700 via-indigo-800 to-slate-900 p-10 rounded-[3rem] text-white shadow-2xl relative overflow-hidden group border border-white/5">
+        <Sparkles className="absolute right-[-40px] top-[-40px] w-80 h-80 text-white/5 group-hover:rotate-12 transition-transform duration-1000" />
+        <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+          <div>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 bg-white/10 backdrop-blur-md rounded-2xl border border-white/10">
+                  <ChefHat size={32} className="text-indigo-300" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black uppercase tracking-tight leading-tight">Culinary Strategy &<br/>Catering Intelligence</h2>
+                <p className="text-indigo-200/70 text-xs font-bold uppercase tracking-widest mt-1">AI-Powered Gastronomy Design</p>
+              </div>
             </div>
-            <h2 className="text-xl font-black uppercase tracking-tight">AI Catering Intelligence</h2>
-          </div>
-          <p className="text-indigo-50/80 mb-6 font-medium">
-            Search for local Catering providers at any international airport. 
-          </p>
-          <div className="flex gap-2">
-            <input 
-              type="text" 
-              placeholder="Enter ICAO Airport Code (e.g. OMDB)..." 
-              value={enrichmentAirport}
-              onChange={(e) => setEnrichmentAirport(e.target.value.toUpperCase())}
-              className="px-4 py-3 bg-white/10 border border-white/20 rounded-2xl text-sm placeholder:text-white/50 focus:ring-2 focus:ring-white/20 outline-none w-full max-w-xs"
-            />
+            <p className="text-indigo-100/80 mb-8 font-medium leading-relaxed">
+              Design a bespoke in-flight culinary experience based on your specific route, aircraft equipment, and local provision availability.
+            </p>
+            
+            <div className="grid grid-cols-2 gap-4">
+               <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-indigo-300 ml-1 mb-1.5 block">Dep Airport</label>
+                  <input 
+                    type="text" 
+                    placeholder="OMDB" 
+                    value={intelForm.departure}
+                    onChange={(e) => setIntelForm({ ...intelForm, departure: e.target.value.toUpperCase() })}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl text-sm placeholder:text-white/30 focus:ring-2 focus:ring-indigo-400 outline-none transition-all"
+                  />
+               </div>
+               <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-indigo-300 ml-1 mb-1.5 block">Arr Airport</label>
+                  <input 
+                    type="text" 
+                    placeholder="EGLL" 
+                    value={intelForm.arrival}
+                    onChange={(e) => setIntelForm({ ...intelForm, arrival: e.target.value.toUpperCase() })}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl text-sm placeholder:text-white/30 focus:ring-2 focus:ring-indigo-400 outline-none transition-all"
+                  />
+               </div>
+               <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-indigo-300 ml-1 mb-1.5 block">Aircraft</label>
+                  <input 
+                    type="text" 
+                    placeholder="G650" 
+                    value={intelForm.aircraft}
+                    onChange={(e) => setIntelForm({ ...intelForm, aircraft: e.target.value.toUpperCase() })}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl text-sm placeholder:text-white/30 focus:ring-2 focus:ring-indigo-400 outline-none transition-all"
+                  />
+               </div>
+               <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-indigo-300 ml-1 mb-1.5 block">Pax</label>
+                  <input 
+                    type="number" 
+                    value={intelForm.pax}
+                    onChange={(e) => setIntelForm({ ...intelForm, pax: parseInt(e.target.value) || 0 })}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl text-sm placeholder:text-white/30 focus:ring-2 focus:ring-indigo-400 outline-none transition-all"
+                  />
+               </div>
+               <div>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-indigo-300 ml-1 mb-1.5 block">Duration (H)</label>
+                  <input 
+                    type="number" 
+                    step="0.5"
+                    value={intelForm.duration}
+                    onChange={(e) => setIntelForm({ ...intelForm, duration: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-2xl text-sm placeholder:text-white/30 focus:ring-2 focus:ring-indigo-400 outline-none transition-all"
+                  />
+               </div>
+            </div>
+
             <button 
-              onClick={handleAIEnrich}
-              className="bg-white text-indigo-800 px-6 py-3 rounded-2xl font-black uppercase tracking-widest text-xs flex items-center gap-2 transition-all hover:bg-indigo-50"
+              onClick={handleGenerateIntel}
+              disabled={intelLoading || !intelForm.departure || !intelForm.arrival}
+              className="mt-8 w-full bg-white text-indigo-900 px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[11px] flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 shadow-xl shadow-black/20"
             >
-              {isEnriching ? <Loader2 className="animate-spin" size={16} /> : <Search size={16} />}
-              {isEnriching ? 'Searching...' : 'Enrich & Search'}
+              {intelLoading ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
+              {intelLoading ? 'Generating Culinary Strategy...' : 'Design Catering Strategy'}
             </button>
           </div>
-          
-          {enrichmentResults.length > 0 && (
-            <div className="mt-6 bg-white/10 border border-white/10 rounded-2xl p-4">
-              <h4 className="text-sm font-bold uppercase tracking-widest mb-3">AI Suggestions:</h4>
-              {enrichmentResults.map((result, i) => (
-                <div key={i} className="flex items-center justify-between p-3 bg-white/5 rounded-xl hover:bg-white/10">
-                  <span className="font-bold text-sm">{result.name}</span>
-                  <button 
-                    onClick={() => saveEnrichedProvider(result)}
-                    className="bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide flex items-center gap-1 hover:bg-emerald-600"
-                  >
-                    <Plus size={12} /> Add
-                  </button>
+
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2.5rem] p-8 h-full min-h-[500px] flex flex-col">
+            {cateringIntel ? (
+              <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="space-y-6 flex-1 flex flex-col"
+              >
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <h3 className="text-xl font-black uppercase tracking-tight text-white">{cateringIntel.strategyName}</h3>
+                    <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest mt-1">Strategic Culinary Architecture</p>
+                  </div>
+                  <div className="bg-white/10 px-3 py-1 rounded-full border border-white/10">
+                     <span className="text-[9px] font-black text-white/50 uppercase tracking-widest">{cateringIntel.destinationCuisineNote}</span>
+                  </div>
                 </div>
-              ))}
-            </div>
-          )}
+
+                <div className="flex p-1 bg-white/5 rounded-2xl border border-white/5">
+                  {cateringIntel.tiers?.map((tier: any, idx: number) => (
+                    <button
+                      key={tier.name}
+                      onClick={() => setSelectedTierIndex(idx)}
+                      className={`flex-1 py-2 px-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${
+                        selectedTierIndex === idx 
+                          ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' 
+                          : 'text-indigo-200/50 hover:bg-white/5 hover:text-indigo-200'
+                      }`}
+                    >
+                      {tier.name}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between px-2">
+                  <div className="flex items-center gap-2">
+                    <DollarSign size={14} className="text-emerald-400" />
+                    <span className="text-[11px] font-black text-emerald-400 uppercase tracking-widest">${cateringIntel.tiers[selectedTierIndex].totalEstimatedCost} Project Total</span>
+                  </div>
+                  <span className="text-[9px] font-bold text-white/40 uppercase">Est. ${cateringIntel.tiers[selectedTierIndex].estimatedCostPerPax} / PAX</span>
+                </div>
+
+                {cateringIntel.dietaryAudit && cateringIntel.dietaryAudit.length > 0 && (
+                   <div className="flex flex-wrap gap-2">
+                     {cateringIntel.dietaryAudit.map((item: string, i: number) => (
+                       <span key={i} className="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 bg-white/10 text-indigo-200 rounded-full border border-white/5">
+                         {item}
+                       </span>
+                     ))}
+                   </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white/5 p-4 rounded-2xl border border-white/5 relative overflow-hidden group/card shadow-sm">
+                    <div className="flex items-center gap-2 mb-2 relative z-10">
+                       <Wine size={14} className="text-indigo-400" />
+                       <span className="text-[9px] font-black uppercase tracking-widest text-indigo-200">Sommelier Protocol</span>
+                    </div>
+                    <p className="text-[10px] text-white/80 italic relative z-10 line-clamp-3">"{cateringIntel.tiers[selectedTierIndex].sommelierNotes}"</p>
+                    <div className="absolute right-[-10px] bottom-[-10px] opacity-10 group-hover/card:rotate-12 transition-transform">
+                      <Wine size={48} />
+                    </div>
+                  </div>
+                  <div className="bg-white/5 p-4 rounded-2xl border border-white/5 relative overflow-hidden group/card shadow-sm">
+                    <div className="flex items-center gap-2 mb-2 relative z-10">
+                       <Coffee size={14} className="text-indigo-400" />
+                       <span className="text-[9px] font-black uppercase tracking-widest text-indigo-200">Terroir Intelligence</span>
+                    </div>
+                    <p className="text-[10px] text-white/80 leading-relaxed relative z-10 line-clamp-3">{cateringIntel.localFoodIntelligence}</p>
+                    <div className="absolute right-[-10px] bottom-[-10px] opacity-10 group-hover/card:-rotate-12 transition-transform">
+                      <Coffee size={48} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                  {/* Service Timeline Table */}
+                  <div className="bg-white/5 p-4 rounded-2xl border border-white/5 mb-6">
+                     <h4 className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-3 flex items-center gap-2">
+                       <Clock3 size={14} /> In-Flight Service Timeline
+                     </h4>
+                     <table className="w-full text-left">
+                       <thead>
+                         <tr>
+                           <th className="text-[8px] font-black uppercase text-indigo-200/50 p-1">Timing</th>
+                           <th className="text-[8px] font-black uppercase text-indigo-200/50 p-1">Service</th>
+                           <th className="text-[8px] font-black uppercase text-indigo-200/50 p-1">Items</th>
+                         </tr>
+                       </thead>
+                       <tbody className="divide-y divide-white/5">
+                         {(cateringIntel.tiers[selectedTierIndex].serviceTimeline || []).map((step: any, i: number) => (
+                           <tr key={i}>
+                             <td className="text-[9px] font-bold text-white p-1 align-top">{step.timing}</td>
+                             <td className="text-[9px] font-bold text-indigo-300 p-1 align-top">{step.serviceType}</td>
+                             <td className="p-1 align-top">
+                               <div className="text-[9px] text-white/70">{step.items.join(', ')}</div>
+                               <div className="text-[8px] text-white/40 italic">{step.notes}</div>
+                             </td>
+                           </tr>
+                         ))}
+                       </tbody>
+                     </table>
+                  </div>
+
+                  {/* TableData Table */}
+                  <div className="bg-white/5 p-4 rounded-2xl border border-white/5 mb-6">
+                     <h4 className="text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-3 flex items-center gap-2">
+                       <ChefHat size={14} /> Catering Breakdown
+                     </h4>
+                     <table className="w-full text-left text-[10px]">
+                       <thead>
+                         <tr className="border-b border-indigo-500/30">
+                           <th className="p-2">Meal Service</th>
+                           <th className="p-2">Item / Content</th>
+                           <th className="p-2 text-right">Cost</th>
+                           <th className="p-2 text-right">Pax</th>
+                           <th className="p-2 text-right">Total</th>
+                         </tr>
+                       </thead>
+                       <tbody className="divide-y divide-white/5">
+                         {(cateringIntel.tiers[selectedTierIndex].tableData || []).map((row: any, i: number) => (
+                           <tr key={i} className="hover:bg-white/5">
+                             <td className="p-2 font-bold text-white">{row.mealService}</td>
+                             <td className="p-2 text-white/70">{row.itemContent}</td>
+                             <td className="p-2 text-right text-indigo-300 font-mono">${row.perPaxCost.toFixed(2)}</td>
+                             <td className="p-2 text-right text-white/50 font-mono">{row.pax}</td>
+                             <td className="p-2 text-right text-white font-mono font-bold">${row.totalCost.toFixed(2)}</td>
+                           </tr>
+                         ))}
+                       </tbody>
+                     </table>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-white/10 flex items-center gap-3 bg-black/10 -mx-8 px-8 py-4 mt-auto rounded-b-[2.5rem]">
+                   <Info size={16} className="text-indigo-400 shrink-0" />
+                   <div className="flex-1">
+                    <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest mb-1 leading-none">Operational Galley Logistics ({cateringIntel.tiers[selectedTierIndex].platingStyle})</p>
+                    <p className="text-[10px] text-indigo-100/60 leading-tight italic">
+                      {cateringIntel.galleyLogistics}
+                    </p>
+                   </div>
+                </div>
+              </motion.div>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+                <ChefHat size={48} className="text-white/10 mb-6" />
+                <h4 className="text-lg font-black uppercase tracking-tight text-white/40">Ready for Culinary Design</h4>
+                <p className="text-sm text-white/20 font-medium max-w-[240px] mt-2">
+                  Input voyage details to generate an AI-powered luxury catering plan.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {[
-          { label: 'Global Providers', value: providers.length, icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-900/20' },
-          { label: 'Maintained Airports', value: [...new Set(providers.flatMap(p => p.airports))].length, icon: MapPin, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
+          { label: 'Global Providers', value: providers.length, icon: Building2, color: 'text-indigo-600', bg: 'bg-white dark:bg-gray-800' },
+          { label: 'Maintained Airports', value: [...new Set(providers.flatMap(p => p.airports))].length, icon: MapPin, color: 'text-emerald-600', bg: 'bg-white dark:bg-gray-800' },
+          { label: 'AVG Catering Fee', value: `$${Math.round(providers.reduce((acc, p) => acc + (p.cateringFee || 0), 0) / (providers.length || 1))}`, icon: DollarSign, color: 'text-amber-600', bg: 'bg-white dark:bg-gray-800' },
+          { label: 'Active Regions', value: 'Global', icon: Globe, color: 'text-sky-600', bg: 'bg-white dark:bg-gray-800' },
          ].map((stat, i) => (
-          <div key={i} className={`${stat.bg} p-6 rounded-3xl border border-gray-100 dark:border-gray-800`}>
-            <div className={`p-3 rounded-xl bg-white dark:bg-gray-800 w-fit shadow-sm mb-4 ${stat.color}`}>
+          <div key={i} className={`${stat.bg} p-6 rounded-[2rem] border border-gray-100 dark:border-gray-700 shadow-sm transition-all hover:scale-[1.02]`}>
+            <div className={`p-3 rounded-xl bg-gray-50 dark:bg-gray-900 w-fit mb-4 ${stat.color}`}>
               <stat.icon size={20} />
             </div>
-            <p className="text-2xl font-black text-gray-900 dark:text-white">{stat.value}</p>
-            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">{stat.label}</p>
+            <p className="text-3xl font-black text-gray-900 dark:text-white uppercase tracking-tighter">{stat.value}</p>
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mt-1 leading-none">{stat.label}</p>
           </div>
         ))}
+      </div>
+
+      {/* Provider Sourcing Section */}
+      <div className="bg-white dark:bg-gray-800 p-8 rounded-[3rem] border border-gray-100 dark:border-gray-700 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+           <div>
+              <h3 className="text-lg font-black uppercase tracking-tight text-gray-900 dark:text-white flex items-center gap-2">
+                 <Search size={22} className="text-indigo-600" />
+                 Global Provider Sourcing
+              </h3>
+              <p className="text-xs text-gray-500 font-medium">Verify and import real-world catering companies at your destination.</p>
+           </div>
+           <div className="flex gap-2 min-w-[300px]">
+              <input 
+                type="text" 
+                placeholder="ICAO Airport (e.g. OMDB)" 
+                value={enrichmentAirport}
+                onChange={(e) => setEnrichmentAirport(e.target.value.toUpperCase())}
+                className="flex-1 px-5 py-3 bg-gray-50 dark:bg-gray-900 border-none rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-bold"
+              />
+              <button 
+                onClick={handleAIEnrich}
+                disabled={isEnriching || !enrichmentAirport}
+                className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center gap-2 transition-all hover:bg-indigo-700 shadow-lg shadow-indigo-200 dark:shadow-none disabled:opacity-50"
+              >
+                {isEnriching ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
+                {isEnriching ? 'Sourcing...' : 'AI Sourcing'}
+              </button>
+           </div>
+        </div>
+
+        {enrichmentResults.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-8"
+          >
+            {enrichmentResults.map((result, i) => (
+              <div key={i} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-700 hover:bg-indigo-50/50 transition-colors">
+                <div>
+                  <span className="font-black text-xs text-gray-900 dark:text-white uppercase tracking-tight block">{result.name}</span>
+                  <span className="text-[9px] font-bold text-gray-400 border border-gray-200 px-1.5 py-0.5 rounded uppercase mt-1 inline-block">Score: {result.rating}/5</span>
+                </div>
+                <button 
+                  onClick={() => saveEnrichedProvider(result)}
+                  className="bg-indigo-600 text-white p-2.5 rounded-xl hover:bg-indigo-700 transition shadow-sm"
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+            ))}
+          </motion.div>
+        )}
       </div>
 
       {/* Database Section Header */}

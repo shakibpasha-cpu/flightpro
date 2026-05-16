@@ -1,4 +1,4 @@
-import { getAI, handleAiError, isAiInCooldown } from './aiService';
+import { getAI, handleAiError, isAiInCooldown, safeParseJson } from './aiService';
 
 export interface RestrictedAirspace {
   id: string;
@@ -150,7 +150,7 @@ export async function getLiveSafetyAlerts(): Promise<RestrictedAirspace[]> {
       },
     });
 
-    const data = JSON.parse(response.text);
+    const data = safeParseJson(response.text);
     const alerts = data.alerts || [];
     
     // Update cache

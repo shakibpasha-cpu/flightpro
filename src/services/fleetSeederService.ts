@@ -1,6 +1,6 @@
 import { collection, addDoc, getDocs, query, where, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { getAI, handleAiError } from './aiService';
+import { getAI, handleAiError, safeParseJson } from './aiService';
 import { safeStringify } from '../utils/safeJson';
 
 export const fleetSeederService = {
@@ -198,7 +198,7 @@ export const fleetSeederService = {
       });
 
       if (!aiResponse.text) throw new Error("No response from AI for fleet analysis");
-      const data = JSON.parse(aiResponse.text);
+      const data = safeParseJson(aiResponse.text);
 
       // 2. Process Fleet
       let totalFleetSize = 0;
@@ -328,7 +328,7 @@ export const fleetSeederService = {
             });
             
             if (aiResponse.text) {
-              const specs = JSON.parse(aiResponse.text);
+              const specs = safeParseJson(aiResponse.text);
               
               // Map specs to match the collection's field names
               const updateData: any = {
@@ -480,7 +480,7 @@ export const fleetSeederService = {
             });
 
             if (response.text) {
-              const enrichedData = JSON.parse(response.text);
+              const enrichedData = safeParseJson(response.text);
               
               const opDocRef = doc(db, colName, opData.id);
               await updateDoc(opDocRef, {

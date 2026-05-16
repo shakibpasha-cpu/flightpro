@@ -71,6 +71,7 @@ import CateringDatabase from './components/CateringDatabase';
 import FuelDatabase from './components/FuelDatabase';
 import PermitDatabase from './components/PermitDatabase';
 import CrewManagement from './components/CrewManagement';
+import CrewConflictIntelligence from './components/CrewConflictIntelligence';
 import Breadcrumbs from './components/Breadcrumbs';
 import PitchDeck from './components/PitchDeck';
 import { QuotaMonitor } from './components/QuotaMonitor';
@@ -1050,7 +1051,11 @@ export default function App() {
             </div>
           ) : activeTab === 'crew-management' ? (
             <div className="max-w-7xl mx-auto">
-              <CrewManagement />
+              <CrewManagement proposedPlan={aiPlan} />
+            </div>
+          ) : activeTab === 'crew-intelligence' ? (
+            <div className="max-w-7xl mx-auto">
+              <CrewConflictIntelligence />
             </div>
           ) : activeTab === 'ai-intelligence' ? (
             <div className="max-w-7xl mx-auto">

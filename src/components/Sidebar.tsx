@@ -47,6 +47,7 @@ export default function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
         { id: 'tracking', label: 'Live Fleet Tracking', icon: Activity },
         { id: 'booking-flow', label: 'Booking Wizard', icon: Plane },
         { id: 'crew-management', label: 'Crew Management', icon: Users },
+        { id: 'crew-intelligence', label: 'Crew Intelligence', icon: ShieldCheck },
       ]
     },
     {

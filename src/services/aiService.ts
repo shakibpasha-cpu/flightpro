@@ -41,23 +41,64 @@ export const getAI = () => {
 /**
  * Safely extracts and parses JSON from a string that might contain markdown or extra text.
  */
-function safeParseJson(text: string): any {
+export function safeParseJson(text: string): any {
+  if (!text) return null;
+  
+  const trimmed = text.trim();
   try {
-    // Attempt standard parse first
-    return JSON.parse(text);
+    // 1. Attempt standard parse first
+    return JSON.parse(trimmed);
   } catch (initialError) {
     try {
-      // Look for JSON block patterns ({ ... } or [ ... ])
-      // Use non-greedy match to find the first block if multiple exist? 
-      // Actually largest block is usually safer for AI output.
-      const jsonMatch = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+      // 2. Look for the largest balanced JSON block
+      const blocks = [];
+      let braceCount = 0;
+      let startIdx = -1;
+      let inString = false;
+      let escape = false;
+
+      for (let i = 0; i < trimmed.length; i++) {
+        const char = trimmed[i];
+        
+        if (char === '"' && !escape) {
+          inString = !inString;
+        }
+
+        if (!inString) {
+          if (char === '{' || char === '[') {
+            if (braceCount === 0) startIdx = i;
+            braceCount++;
+          } else if (char === '}' || char === ']') {
+            braceCount--;
+            if (braceCount === 0 && startIdx !== -1) {
+              blocks.push(trimmed.substring(startIdx, i + 1));
+              startIdx = -1;
+            }
+          }
+        }
+        
+        escape = char === '\\' && !escape;
+      }
+
+      // Try to parse each block found, returning the first one that succeeds and is likely the main result
+      for (const block of blocks) {
+        try {
+          return JSON.parse(block);
+        } catch {
+          continue;
+        }
+      }
+
+      // 3. Fallback to greedy regex for simpler cases
+      const jsonMatch = trimmed.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
       if (jsonMatch) {
         return JSON.parse(jsonMatch[0]);
       }
+      
       throw initialError;
     } catch (finalError) {
-      console.error("JSON Parse Failure. Raw text:", text);
-      throw finalError;
+      console.error("JSON Parse Failure. Raw text snippet:", trimmed.substring(0, 100));
+      return null;
     }
   }
 }
@@ -270,6 +311,10 @@ export async function getOptimizedRoute(departure: string, destination: string, 
   Current FIRs: ${safeStringify(currentFirs)}
   Aircraft Performance: ${safeStringify(aircraftPerformance)}
   User Preferred Optimization Criteria: ${optimizationCriteria || 'balanced (consider cost, time, and fuel)'}
+  - IF 'cheapest': Prioritize minimizing all-up costs, including FIR fees and fuel.
+  - IF 'fastest': Prioritize direct routing and higher flight levels even if fuel burn increases.
+  - IF 'most fuel-efficient': Prioritize optimal flight levels based on wind patterns.
+  - IF 'balanced': Optimize for the best compromise between cost, time, and fuel burn.
   Current Date Context: ${new Date().toISOString()}
   
   🤖 AI BEHAVIOR RULES:
@@ -1078,7 +1123,7 @@ export async function getCommercialViabilitySuggestion(quotesData: any, params: 
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error) {
     console.warn("Using fallback commercial viability suggestion due to API error:", error);
     return {
@@ -1348,7 +1393,7 @@ export async function planComplexFlight(userInput: string, aircraftList: any[], 
       },
     });
 
-    return { ...JSON.parse(response.text), isFallback: false };
+    return { ...safeParseJson(response.text), isFallback: false };
   } catch (error: any) {
     console.error('AI Planning Error:', error);
     
@@ -1654,6 +1699,64 @@ export async function getCateringProvidersForAirport(airportIcao: string) {
   }
 }
 
+export async function generateCateringIntelligence(depIcao: string, arrIcao: string, paxCount: number, durationHours: number, aircraftType: string) {
+  const prompt = `Act as an elite Executive Chef and In-Flight Service Director for a global ultra-high-net-worth (UHNW) flight department.
+  
+  Scenario Context:
+  - Route: ${depIcao} to ${arrIcao}
+  - Total Manifest: ${paxCount} VIP Passengers
+  - Mission Duration: ${durationHours} hours
+  - Aircraft Specification: ${aircraftType}
+  
+  TASK: Provide a comprehensive Catering Intelligence Brief with three distinct service tiers.
+  
+  1. Strategic Culinary Concept
+  2. Master Menu Selection (Multi-Tier Architecture): "Economy Class", "Standard Business", "Ultra-Luxury Bespoke".
+  3. Service Timeline & Tabular Cost breakdown (JSON format):
+     Include a table for each tier containing: "Meal/Service", "Item / Content", "Per Pax Cost" (USD), "Pax" (${paxCount}), "Total Cost" (USD), and "Notes" (e.g. loaded at ${depIcao}).
+     Also include a chronological service timeline for each tier.
+  4. Operational Brief (Packaging, safety, plating).
+  
+  Return a structured JSON object:
+  {
+    "strategyName": "string",
+    "tiers": [
+      {
+        "name": "Economy Class | Standard Business | Ultra-Luxury Bespoke",
+        "tableData": [
+          { "mealService": "string", "itemContent": "string", "perPaxCost": "number", "pax": "number", "totalCost": "number", "notes": "string" }
+        ],
+        "serviceTimeline": [
+            { "timing": "string", "serviceType": "string", "items": ["string"], "notes": "string" }
+        ]
+      }
+    ],
+    "localFoodIntelligence": "string",
+    "galleyLogistics": "string",
+    "dietaryAudit": ["string"],
+    "destinationCuisineNote": "string"
+  }
+  
+  Tone: Highly professional, sophisticated, and operationally precise. Use authentic local knowledge. Avoid generic advice.`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'generateCateringIntelligence');
+    return null;
+  }
+}
+
 export async function getFuelProvidersForAirport(airportIcao: string) {
   const prompt = `Research and identify REAL aviation fuel service providers (FBOs or specialized fuel companies) at or serving ${airportIcao}.
   Include major global networks like Shell Aviation, Air BP, World Fuel Services, TotalEnergies, or local airport fuel farms and FBOs like Signature, Jet Aviation, ExecuJet.
@@ -1881,7 +1984,7 @@ export async function generateACMIQuote(params: {
       },
     });
 
-    return { ...JSON.parse(response.text), isFallback: false };
+    return { ...safeParseJson(response.text), isFallback: false };
   } catch (error: any) {
     console.error("AI Analysis Error:", error);
     
@@ -2318,6 +2421,46 @@ export async function analyzeFlightPlan(plan: any) {
   }
 }
 
+export async function analyzeFlightPlanRisks(plan: any) {
+  const prompt = `Analyze the following flight plan for specific operational and financial risks:
+  ${safeStringify(plan)}
+  
+  CRITICAL RISK CATEGORIES:
+  1. EXTENDED RANGE OPERATIONS (ETOPS/EDTO): Identify legs where the flight path is far from adequate alternate airports (e.g., over oceans or remote areas). Assess if the selected aircraft (${plan.suggestedAircraft}) is suitable.
+  2. HIGH FIR CHARGES: Identify FIRs along the route with exceptionally high overflight or navigation charges. Suggest avoidance if possible.
+  3. RESTRICTED AIRSPACES & CONFLICT ZONES: Identify any known restricted airspaces, military zones, or conflict zones currently active along the route.
+  4. OPERATIONAL SEVERITY: Categorize each risk with a severity level (Low, Medium, High).
+  
+  Return JSON: {
+    "risks": [
+      { 
+        "category": "ETOPS" | "FIR Charges" | "Airspace" | "Operational",
+        "severity": "Low" | "Medium" | "High",
+        "title": "string",
+        "description": "string",
+        "mitigation": "string"
+      }
+    ],
+    "summary": "string"
+  }`;
+  
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        tools: [{ googleSearch: {} }],
+      },
+    });
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'analyzeFlightPlanRisks');
+    return null;
+  }
+}
+
 export async function fetchSpecificCharge(firCode: string, firName: string, chargeType: 'overflight' | 'navigation'): Promise<number> {
   const prompt = `Find the current ${chargeType} charge in USD for the FIR (Flight Information Region) ${firCode} - ${firName}.
   Return ONLY a JSON object with a single key "charge" containing the numeric value in USD.
@@ -2335,7 +2478,7 @@ export async function fetchSpecificCharge(firCode: string, firName: string, char
       },
     });
     
-    const data = JSON.parse(response.text);
+    const data = safeParseJson(response.text);
     return data.charge || 0;
   } catch (error) {
     handleAiError(error, 'fetchSpecificCharge');
@@ -2360,7 +2503,7 @@ export async function fetchFIRRules(firCode: string, firName: string): Promise<s
       },
     });
     
-    const data = JSON.parse(response.text);
+    const data = safeParseJson(response.text);
     return data.rules || "No specific rules found.";
   } catch (error) {
     handleAiError(error, 'fetchFIRRules');
@@ -2429,7 +2572,7 @@ export async function getOptimizationAlternatives(plan: any, criteria: string) {
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error) {
     handleAiError(error, 'getOptimizationAlternatives');
     return { alternatives: [] };
@@ -2551,7 +2694,7 @@ export async function searchHandlingAgents(icao: string, airportName?: string, c
       },
     });
 
-    const data = JSON.parse(response.text);
+    const data = safeParseJson(response.text);
 
     // Filter out obviously corporate or placeholder results if any slipped through
     if (data.agents) {
@@ -2768,7 +2911,7 @@ export async function predictAvailability(aircraftId: string, liveData: any, uti
       },
     });
  
-    const result = JSON.parse(response.text);
+    const result = safeParseJson(response.text);
 
     // Update cache
     try {
@@ -2842,7 +2985,7 @@ export async function analyzePermits(plan: any) {
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error: any) {
     handleAiError(error, 'analyzePermits');
     return null;
@@ -2875,7 +3018,7 @@ export async function getPermitDetails(country: string, type: string) {
         tools: [{ googleSearch: {} }],
       },
     });
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error) {
     console.error(`Failed to fetch permit details for ${country}:`, error);
     return {
@@ -2993,7 +3136,7 @@ export async function calculateACMIQuote(params: {
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error) {
     handleAiError(error, 'calculateACMIQuote');
     return null;
@@ -3049,7 +3192,7 @@ export async function getOperatorDetails(operatorName: string, country?: string)
       },
     });
  
-    const details = JSON.parse(response.text);
+    const details = safeParseJson(response.text);
 
     // Update cache
     try {
@@ -3363,7 +3506,7 @@ export async function getAircraftDetails(searchQuery: string) {
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error) {
     handleAiError(error, 'getAircraftDetails');
     return null;
@@ -3428,7 +3571,7 @@ export async function getDetailedPDFReportData(departure: string, destination: s
       },
     });
 
-    return JSON.parse(response.text);
+    return safeParseJson(response.text);
   } catch (error) {
     console.error('getDetailedPDFReportData error:', error);
     return null;
@@ -3540,7 +3683,7 @@ export async function getOptimizedRouteSuggestions(departure: string, destinatio
   Analyze a flight mission from ${departure} to ${destination} using a ${aircraftType}.
   
   CONTEXT:
-  - Mission: ${JSON.stringify(missionParams)}
+  - Mission: ${safeStringify(missionParams)}
   - Target: Optimize for TOTAL FUEL EFFICIENCY and COST.
   
   CONSIDER:
@@ -3768,6 +3911,270 @@ export async function getPermitDetailsByCountry(country: string) {
     return safeParseJson(response.text);
   } catch (error) {
     handleAiError(error, 'getPermitDetailsByCountry');
+    return null;
+  }
+}
+
+export async function suggestCrewForMission(plan: any, roster: any[], historicalDutyLogs: any[]) {
+  const prompt = `Act as an expert Flight Operations Dispatcher and Crew Scheduler. 
+  
+  CONTEXT:
+  - Flight Plan: ${safeStringify(plan)}
+  - Roster: ${safeStringify(roster)}
+  - Historical Duty Logs: ${safeStringify(historicalDutyLogs)}
+  
+  TASK:
+  Assign the most suitable and compliant crew members to each leg of the mission.
+  
+  RULES:
+  1. Respect IATA/EASA FTL: Minimum 12h rest between duties, max flight duty periods (usually 13h for 2 pilots).
+  2. Role Matching: Ensure at least a Captain and First Officer per leg.
+  3. Efficiency: Prefer crew members with lower monthly hours to balance workload.
+  
+  Return a JSON object:
+  {
+    "assignedCrew": [
+      {
+        "legIndex": number,
+        "crewIds": ["string"],
+        "justification": "string",
+        "complianceScore": "Green" | "Yellow" | "Red"
+      }
+    ],
+    "overallSafetyBrief": "string"
+  }`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-1.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+    return response.text ? JSON.parse(response.text.replace(/```json|```/g, '').trim()) : null;
+  } catch (error) {
+    handleAiError(error, 'suggestCrewForMission');
+  }
+}
+
+export async function enhanceAircraftSpecs(aircrafts: any[]) {
+  const enhancedAircrafts = await Promise.all(
+    aircrafts.map(async (aircraft) => {
+      try {
+        const details = await getAircraftDetails(aircraft.type);
+        if (!details) return { id: aircraft.id, success: false };
+
+        const updatedData: Partial<any> = { ...aircraft };
+        let updated = false;
+
+        const fieldsToFix = [
+          'fuelBurnPerHour', 'cruiseSpeed', 'maxPayload', 'maxPassengers',
+          'takeoffDistance', 'landingDistance', 'range', 'mtow', 'runwayRequired'
+        ];
+
+        for (const field of fieldsToFix) {
+          if (!updatedData[field] || updatedData[field] === 0 || updatedData[field] === '') {
+            if (details[field]) {
+              updatedData[field] = details[field];
+              updated = true;
+            }
+          }
+        }
+
+        if (updated) {
+          updatedData.ai_verified = true;
+          updatedData.last_enhanced = new Date().toISOString();
+          await updateDoc(doc(db, 'aircraft', aircraft.id), updatedData as any);
+          return { id: aircraft.id, success: true, changes: updatedData };
+        }
+        return { id: aircraft.id, success: false, reason: 'Already complete' };
+      } catch (error) {
+        console.error(`Error enhancing ${aircraft.type}:`, error);
+        return { id: aircraft.id, success: false, error };
+      }
+    })
+  );
+  return enhancedAircrafts;
+}
+
+export async function checkCrewCompliance(crewMember: any, dutyLogs: any[]) {
+  const prompt = `Act as an Aviation Safety Auditor specializing in ICAO Annex 6 (Operation of Aircraft) - Flight and Duty Time Limitations (FTL).
+  
+  Crew Member Profile:
+  - Role: ${crewMember.role}
+  - Total Career Hours: ${crewMember.totalHours}
+  
+  Recent Duty Logs (Last 90 days):
+  ${safeStringify(dutyLogs)}
+  
+  Current System Time: ${new Date().toISOString()}
+
+  Evaluate compliance based on ICAO standard guidelines (which typically include):
+  1. Flight Time Limits: 100 hours per 28 consecutive days, 1000 hours per calendar year.
+  2. Duty Period Limits: Max 13-14 hours (depending on sectors).
+  3. Rest Requirements: Minimum 10 hours rest or as long as previous duty period.
+  4. Cumulative Limits: Max duty of 60 hours in 7 days, 190 hours in 28 days.
+  5. Per Diem Calculation: Estimate a standard per diem (USD) based on duty durations and types (Flight/Positioning).
+
+  Return a JSON object:
+  {
+    "status": "Green" | "Yellow" | "Red",
+    "isLegal": boolean,
+    "summary": "string",
+    "violations": ["string"],
+    "metrics": {
+      "hours7Days": number,
+      "hours28Days": number,
+      "restTimeRemainingHours": number,
+      "nextLegalDutyStart": "ISO Date String"
+    },
+    "estimatedPerDiem": number,
+    "complianceNotes": "string"
+  }
+  
+  Be strict with safety. If a rest period is violated or hours are near limits, mark as Red/Yellow.`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-1.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'checkCrewCompliance');
+    return null;
+  }
+}
+
+export async function analyzeCrewScheduleConflicts(
+  crewMember: any, 
+  proposedSchedule: any, 
+  historicalLogs: any[], 
+  existingSchedules: any[]
+) {
+  const prompt = `Act as an Aviation Regulatory Compliance Officer (ICAO Annex 6).
+  
+  Task: Identify duty conflicts for ${crewMember.name} (${crewMember.role}) regarding a NEW Proposed Schedule.
+  
+  Crew Member State:
+  - Role: ${crewMember.role}
+  - Career Hours: ${crewMember.totalHours}
+  
+  Historical Duty (Last 28 Days):
+  ${safeStringify(historicalLogs)}
+  
+  Existing Confirmed Assignments (Excluding this proposal):
+  ${safeStringify(existingSchedules)}
+  
+  NEW Proposed Schedule (${proposedSchedule.date}):
+  ${safeStringify(proposedSchedule.flights)}
+  
+  Rules to enforce (ICAO FTL):
+  1. Maximum daily duty period (usually 13h, reduced for increased sectors).
+  2. Minimum rest period between duties (10-12h or previous duty length).
+  3. Cumulative limits: 100h in 28 days, 190h duty in 28 days.
+  4. Weekly rest requirements.
+  5. Check for physical overlaps between existing assignments and the new proposal.
+  
+  Return a JSON list of conflicts found:
+  {
+    "hasConflicts": boolean,
+    "conflicts": [
+      {
+        "severity": "Critical" | "Warning",
+        "type": "Duty Time" | "Rest Violation" | "Overlap" | "Cumulative Hours",
+        "message": "Detailed explanation of why this is a conflict",
+        "regulationRef": "ICAO Annex 6 / FTL Rule"
+      }
+    ],
+    "recommendation": "string"
+  }
+  
+  Current System Time: ${new Date().toISOString()}`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-1.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'analyzeCrewScheduleConflicts');
+    return { hasConflicts: false, conflicts: [], recommendation: "Analysis failed" };
+  }
+}
+
+export async function getIataComplianceSuggestion(missionParams: {
+  departure: string;
+  destination: string;
+  reportingTime: string;
+  chockOnTime: string;
+  flyingTime: number;
+  sectors: number;
+  isMultiCrew?: boolean;
+}) {
+  const prompt = `Act as an expert Aviation Compliance Officer specialized in IATA and EASA Flight Time Limitations (FTL).
+  
+  MISSION DETAILS:
+  - Departure: ${missionParams.departure}
+  - Destination: ${missionParams.destination}
+  - Reporting Time: ${missionParams.reportingTime}
+  - Chock On Time: ${missionParams.chockOnTime}
+  - Flying Time (Block Hours): ${missionParams.flyingTime}
+  - Number of Sectors: ${missionParams.sectors}
+  - Current Crew Setup: ${missionParams.isMultiCrew ? 'Multi-Crew (3+ pilots)' : 'Standard (2 pilots)'}
+  
+  TASK:
+  1. Calculate the Flight Duty Period (FDP).
+  2. Determine if the Duty is within legal limits for the current crew setup.
+  3. Suggest if "Multi-Crew" or "Augmented Crew" is required for this specific mission.
+  4. Calculate the MANDATORY rest period required after this duty before the next flight.
+  5. Suggest the EARLIEST possible time for the next flight (Next Fly After Rest).
+  6. Identify if there is "Over Time" (exceeding standard FDP) or if it's comfortably "Under Time".
+  
+  Return a JSON object:
+  {
+    "fdpCalculated": string,
+    "limitUsed": string,
+    "isCompliant": boolean,
+    "status": "Within Limits" | "Margin" | "Exceeded",
+    "recommendations": {
+      "crewAugmentation": "None" | "Augmented" | "Double Crew",
+      "restRequired": string,
+      "earliestNextDuty": string,
+      "overTimeUnderTime": string
+    },
+    "reasoning": "string",
+    "iataLawsReference": "string"
+  }
+  
+  Ensure calculations follow IATA/EASA subpart FTL standards strictly.`;
+
+  try {
+    const ai = getAI();
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+      },
+    });
+
+    return safeParseJson(response.text);
+  } catch (error) {
+    handleAiError(error, 'getIataComplianceSuggestion');
     return null;
   }
 }
