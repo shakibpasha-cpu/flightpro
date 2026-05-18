@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAirportDetails, searchAirports, searchHandlingAgents, getLegFIRAnalysis } from '../services/aiService';
 import { getLiveWeather, getLiveNotams, MetarData, NotamData } from '../services/weatherService';
-import { Layers, Map as MapIcon, Compass, Wind, Shield, Info, X, ChevronRight, ChevronDown, GripVertical, ListOrdered, Clock, Trash2, Plus, Globe, Plane, Route, Users, Sparkles, Loader2, Mail, Phone, ExternalLink, Cloud, Activity, MousePointer2, ShieldAlert } from 'lucide-react';
+import { Layers, Map as MapIcon, Compass, Wind, Shield, MapPin, Info, X, ChevronRight, ChevronDown, GripVertical, ListOrdered, Clock, Trash2, Plus, Globe, Plane, Route, Users, Sparkles, Loader2, Mail, Phone, ExternalLink, Cloud, Activity, MousePointer2, ShieldAlert } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { getGlobalRestrictedAirspaces, getLiveSafetyAlerts, RestrictedAirspace as GlobalRestrictedAirspace } from '../services/safetyService';
 import { CHART_LAYERS, DefaultIcon, getBearing, getMidpoint, calculateDistance, doesLegIntersectPolygon } from '../lib/mapConfig';
@@ -406,8 +406,9 @@ export default function FlightMap({
         setLocalLegs(newLegs);
         onLegsChange?.(newLegs, true);
       }
-    } catch (error) {
-      console.error("Error fetching FIRs:", error);
+    } catch (error: any) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`Error fetching FIRs: ${errorMsg}`);
     } finally {
       setFetchingFIRsForLeg(null);
     }
@@ -424,8 +425,9 @@ export default function FlightMap({
         setLocalLegs(newLegs);
         onLegsChange?.(newLegs, true);
       }
-    } catch (err) {
-      console.error('Error refreshing handling agents:', err);
+    } catch (err: any) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error(`Error refreshing handling agents: ${errorMsg}`);
     } finally {
       setFetchingAgents(false);
     }
@@ -445,7 +447,8 @@ export default function FlightMap({
           }
           setFetchingAgents(false);
         }).catch(err => {
-          console.error('Error fetching handling agents:', err);
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          console.error(`Error fetching handling agents: ${errorMsg}`);
           setFetchingAgents(false);
         });
       }
@@ -472,8 +475,9 @@ export default function FlightMap({
         const unique = merged.filter((v, i, a) => a.findIndex(t => (t.id === v.id)) === i);
         
         setGlobalRestrictedAirspaces(unique);
-      } catch (e) {
-        console.error("Failed to fetch global restricted airspaces", e);
+      } catch (e: any) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error(`Failed to fetch global restricted airspaces: ${errorMsg}`);
       }
     };
     fetchAirspaces();
@@ -797,8 +801,9 @@ export default function FlightMap({
                 const airport = result.airports[0];
                 return { code, lat: airport.lat, lng: airport.lng };
               }
-            } catch (e) {
-              console.error(`Failed to fetch coords for ${code}`, e);
+            } catch (e: any) {
+              const errorMsg = e instanceof Error ? e.message : String(e);
+              console.error(`Failed to fetch coords for ${code}: ${errorMsg}`);
             }
             return null;
           })
@@ -1619,6 +1624,14 @@ export default function FlightMap({
                   Save Global Area
                 </button>
                 <button 
+                  onClick={() => setDrawingPoints(prev => prev.slice(0, -1))}
+                  disabled={drawingPoints.length === 0}
+                  className="px-3 py-2 bg-gray-100 dark:bg-gray-800 text-gray-500 rounded-xl font-black text-[10px] uppercase hover:bg-gray-200 transition-all disabled:opacity-50"
+                  title="Undo Last Point"
+                >
+                  Undo
+                </button>
+                <button 
                   onClick={() => setDrawingPoints([])}
                   className="px-3 py-2 bg-gray-100 dark:bg-gray-800 text-gray-500 rounded-xl font-black text-[10px] uppercase hover:bg-gray-200 transition-all"
                 >
@@ -1825,6 +1838,14 @@ export default function FlightMap({
                         className="flex-1 py-2 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all"
                       >
                         Save Area
+                      </button>
+                      <button 
+                        onClick={() => setDrawingPoints(prev => prev.slice(0, -1))}
+                        disabled={drawingPoints.length === 0}
+                        className="px-3 py-2 bg-gray-100 dark:bg-gray-800 text-gray-500 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-gray-200 dark:hover:bg-gray-700 transition-all disabled:opacity-50"
+                        title="Undo Last Point"
+                      >
+                        Undo
                       </button>
                       <button 
                         onClick={() => setDrawingPoints([])}
@@ -2042,6 +2063,94 @@ export default function FlightMap({
         <MapInstanceSetter setMap={setMapInstance} />
         <MapResizer />
         {getTileLayer(activeChart)}
+
+        {/* Dedicated Map Toolbar */}
+        <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2">
+          <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md p-1.5 rounded-2xl shadow-2xl border border-white/20 dark:border-gray-800 flex flex-col gap-1.5">
+            <button 
+              onClick={() => {
+                setIsDrawingRestrictedArea(!isDrawingRestrictedArea);
+                if (!isDrawingRestrictedArea) {
+                  setDrawingPoints([]);
+                  setIsAddingPOI(false);
+                }
+              }}
+              className={`p-2.5 rounded-xl transition-all ${isDrawingRestrictedArea ? 'bg-red-500 text-white shadow-lg' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+              title={isDrawingRestrictedArea ? "Stop Drawing" : "Draw Restricted Airspace"}
+            >
+              <Shield size={18} />
+            </button>
+            <button 
+              onClick={() => {
+                setIsAddingPOI(!isAddingPOI);
+                if (!isAddingPOI) {
+                  setIsDrawingRestrictedArea(false);
+                }
+              }}
+              className={`p-2.5 rounded-xl transition-all ${isAddingPOI ? 'bg-indigo-600 text-white shadow-lg' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+              title={isAddingPOI ? "Stop Adding POIs" : "Add Point of Interest"}
+            >
+              <MapPin size={18} />
+            </button>
+            <div className="h-px bg-gray-100 dark:bg-gray-800 mx-2" />
+            <div className="relative group">
+              <button 
+                className="p-2.5 rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-all font-bold"
+                title="Change Map Layers"
+              >
+                <Layers size={18} />
+              </button>
+              <div className="absolute left-full top-0 ml-2 hidden group-hover:block transition-all">
+                <div className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-md p-2 rounded-2xl shadow-2xl border border-white/20 dark:border-gray-800 min-w-[200px] animate-in fade-in slide-in-from-left-2 duration-200">
+                  <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2 px-2">Map Layers</p>
+                  <div className="grid grid-cols-1 gap-1">
+                    {Object.entries(CHART_LAYERS).map(([id, chart]) => (
+                      <button
+                        key={id}
+                        onClick={() => setActiveChart(id)}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeChart === id ? 'bg-indigo-600 text-white shadow-lg' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                      >
+                        <Globe size={14} className={activeChart === id ? 'text-white' : 'text-indigo-500'} />
+                        {chart.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Global Active Draw State */}
+        {isDrawingRestrictedArea && (
+          <div className="absolute top-4 left-20 z-[1000] animate-in fade-in slide-in-from-left-4 duration-300">
+            <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-md px-4 py-3 rounded-2xl shadow-2xl border border-red-200 dark:border-red-900/50 flex items-center gap-6">
+              <div className="flex items-center gap-3">
+                <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-red-600 dark:text-red-400">Drawing Restricted Zone</span>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setDrawingPoints(prev => prev.slice(0, -1))}
+                  disabled={drawingPoints.length === 0}
+                  className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50"
+                >
+                  Undo Point
+                </button>
+                <button 
+                  onClick={() => {
+                    setIsDrawingRestrictedArea(false);
+                    setDrawingPoints([]);
+                  }}
+                  className="px-4 py-2 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all hover:bg-red-200 dark:hover:bg-red-800/40"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <MapEvents 
           onMapClick={onMapClick} 
           onMouseMove={(lat, lng) => setMouseCoords({ lat, lng })}
@@ -2102,6 +2211,26 @@ export default function FlightMap({
                 color="#6366f1"
                 weight={2}
                 dashArray="5, 5"
+              />
+            )}
+            {/* Rubber band line */}
+            {mouseCoords && (
+              <Polyline 
+                positions={[drawingPoints[drawingPoints.length - 1], [mouseCoords.lat, mouseCoords.lng]]}
+                color="#6366f1"
+                weight={2}
+                dashArray="5, 10"
+                opacity={0.5}
+              />
+            )}
+            {/* Close polygon rubber band line */}
+            {drawingPoints.length >= 3 && mouseCoords && (
+               <Polyline 
+                positions={[drawingPoints[0], [mouseCoords.lat, mouseCoords.lng]]}
+                color="#6366f1"
+                weight={1}
+                dashArray="2, 4"
+                opacity={0.3}
               />
             )}
           </>

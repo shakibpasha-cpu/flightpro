@@ -1,0 +1,102 @@
+src/services/weatherService.ts:  Return ONLY a JSON object exactly matching this structure:
+src/services/weatherService.ts:  Return ONLY a JSON object exactly matching this structure:
+src/services/fleetSeederService.ts:      Return JSON format:
+src/services/fleetSeederService.ts:            Return JSON format:
+src/services/fleetSeederService.ts:            Return JSON format:
+src/services/safetyService.ts:  Return format strictly JSON: {
+src/services/acmiEngineService.ts:      Format as JSON: { 
+src/services/acmiEngineService.ts:      Provide your prediction as a JSON object.`,
+src/services/aiService.ts: * Safely extracts and parses JSON from a string that might contain markdown or extra text.
+src/services/aiService.ts:    return JSON.parse(trimmed);
+src/services/aiService.ts:      // 2. Look for the largest balanced JSON block
+src/services/aiService.ts:          return JSON.parse(block);
+src/services/aiService.ts:        return JSON.parse(jsonMatch[0]);
+src/services/aiService.ts:      console.error("JSON Parse Failure. Raw text snippet:", trimmed.substring(0, 100));
+src/services/aiService.ts:  Return JSON: {
+src/services/aiService.ts:  Return the result as a JSON object: { 
+src/services/aiService.ts:  Return a JSON object: {
+src/services/aiService.ts:  Return a JSON object: { windComponent: number, description: string }. 
+src/services/aiService.ts:  Return ONLY a JSON object matching this structure:
+src/services/aiService.ts:  Return a JSON object:
+src/services/aiService.ts:  Return a JSON object with the updated legs:
+src/services/aiService.ts:  Return a JSON object:
+src/services/aiService.ts:  OUTPUT FORMAT (STRICT JSON ONLY):
+src/services/aiService.ts:  Return JSON: {
+src/services/aiService.ts:  Return a JSON array of objects:
+src/services/aiService.ts:  Return a JSON object: {
+src/services/aiService.ts:  Return JSON: {
+src/services/aiService.ts:  Return a JSON array of objects:
+src/services/aiService.ts:  Return a JSON array of objects:
+src/services/aiService.ts:  3. Service Timeline & Tabular Cost breakdown (JSON format):
+src/services/aiService.ts:  Return a structured JSON object:
+src/services/aiService.ts:  Return a JSON array of objects: 
+src/services/aiService.ts:  Return JSON: {
+src/services/aiService.ts:  📄 OUTPUT FORMAT (STRICT JSON):
+src/services/aiService.ts:  Return strictly as JSON matching this structure: {
+src/services/aiService.ts:  Return JSON: {
+src/services/aiService.ts:  Return JSON: {
+src/services/aiService.ts:  Return JSON: {
+src/services/aiService.ts:  Return ONLY a JSON object with a single key "charge" containing the numeric value in USD.
+src/services/aiService.ts:  Return ONLY a JSON object with a single key "rules" containing a string of the rules and regulations.
+src/services/aiService.ts:  Return a JSON object:
+src/services/aiService.ts:  Return a JSON object with these fields specifically:
+src/services/aiService.ts:  Return JSON: {
+src/services/aiService.ts:  Return strictly as a JSON object matching this structure: {
+src/services/aiService.ts:  IMPORTANT: Do not include any text before or after the JSON block. Return ONLY the JSON.`;
+src/services/aiService.ts:  Return a JSON object:
+src/services/aiService.ts:  Return a JSON object with:
+src/services/aiService.ts:  Return JSON: {
+src/services/aiService.ts:  Return a JSON object:
+src/services/aiService.ts:  Return JSON: {
+src/services/aiService.ts:  Return strictly as a JSON object: {
+src/services/aiService.ts:  Return JSON: { "firCode": "string", "firName": "string" }.`;
+src/services/aiService.ts:    return JSON.parse(text);
+src/services/aiService.ts:  Return the exactly structured JSON object: {
+src/services/aiService.ts:    // Fallback names if missing from JSON structure but present in prompt mapping
+src/services/aiService.ts:  Return strictly as a JSON object: {
+src/services/aiService.ts:  Return strictly as a JSON object: {
+src/services/aiService.ts:  Return strictly a JSON object with this structure:
+src/services/aiService.ts:  Do not include markdown or text outside JSON. Use google search to verify data.`;
+src/services/aiService.ts:  Return a JSON object:
+src/services/aiService.ts:  Return a JSON object:
+src/services/aiService.ts:  Return a JSON object:
+src/services/aiService.ts:  Return a JSON object:
+src/services/aiService.ts:  Return a JSON array of objects:
+src/services/aiService.ts:  Return a JSON array of objects:
+src/services/aiService.ts:  Return a JSON object:
+src/services/aiService.ts:  Return a JSON object:
+src/services/aiService.ts:    return response.text ? JSON.parse(response.text.replace(/```json|```/g, '').trim()) : null;
+src/services/aiService.ts:  Return a JSON object:
+src/services/aiService.ts:  Return a JSON list of conflicts found:
+src/services/aiService.ts:  Return strictly as a JSON object:
+src/components/MarketScraper.tsx:           Format the output as a JSON array of objects with these exact fields:
+src/components/MarketScraper.tsx:           Return ONLY the JSON array.`;
+src/components/MarketScraper.tsx:             Format the output as a JSON array of objects with these exact fields: 
+src/components/MarketScraper.tsx:             Format the output as a JSON array of objects with these exact fields:
+src/components/MarketScraper.tsx:             Format the output as a JSON array of objects with these exact fields:
+src/components/MarketScraper.tsx:        const data = JSON.parse(text);
+src/components/MultiLegFlightPlanner.tsx:      const cleanedPlan = JSON.parse(safeStringify({
+src/components/CostingSettings.tsx:      alert('Please paste valid JSON data first.');
+src/components/CostingSettings.tsx:      const data = JSON.parse(jsonInput);
+src/components/CostingSettings.tsx:        throw new Error('Data must be a JSON array.');
+src/components/CostingSettings.tsx:      alert(`Successfully imported/updated ${count} aircraft rates from JSON.`);
+src/components/CostingSettings.tsx:      alert(`Invalid JSON format: ${error.message}`);
+src/components/CostingSettings.tsx:              Import Custom JSON Dataset (Aircraft Rates)
+src/components/CostingSettings.tsx:              {importingJson ? 'Importing...' : 'Import JSON Data'}
+src/components/AOCDatabase.tsx:      Return ONLY valid JSON in this exact format, with no markdown formatting or backticks:
+src/components/AOCDatabase.tsx:      const parsed = JSON.parse(jsonStr);
+src/components/AOCDatabase.tsx:      Return ONLY valid JSON in this exact format, with no markdown formatting or backticks:
+src/components/AOCDatabase.tsx:      const parsed = JSON.parse(text);
+src/components/AuthorityIntelligence.tsx:      Return JSON format:
+src/components/AuthorityIntelligence.tsx:      const data = JSON.parse(aiResponse.text);
+src/components/PricingEngine.tsx:        // Final Cost Summary Details from JSON
+src/utils/safeJson.ts: * Safely stringifies an object to JSON, handling circular references and non-serializable types.
+src/utils/safeJson.ts: * and Leaflet objects that often cause "Converting circular structure to JSON" errors.
+src/utils/safeJson.ts:    return JSON.stringify(cleaned, null, indent);
+src/utils/safeJson.ts:    // Definitive fallback if JSON.stringify still fails
+src/utils/safeJson.ts:    return `[JSON.stringify Error: ${error instanceof Error ? error.message : String(error)}]`;
+src/utils/safeJson.ts: * Safely parses a JSON string, returning null if parsing fails.
+src/utils/safeJson.ts:    return JSON.parse(text.trim());
+src/utils/safeJson.ts:    console.error('Safe JSON Parse Error:', error instanceof Error ? error.message : String(error));
+src/App.tsx:        const quoteToSave = JSON.parse(safeStringify({
+src/App.tsx:      const entryToSave = JSON.parse(safeStringify({

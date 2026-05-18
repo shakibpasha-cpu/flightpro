@@ -14,6 +14,7 @@ import { db, auth } from './firebase';
 import { collection, addDoc, getDocs, getDocFromServer, doc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { handleFirestoreError, OperationType } from './services/errorService';
+import { safeStringify } from './utils/safeJson';
 import { seedOperators } from './utils/seedOperators';
 import { seedMROProviders } from './utils/seedMRO';
 import { seedCateringProviders } from './utils/seedCatering';
@@ -308,16 +309,18 @@ export default function App() {
               finalLegs[i] = { ...finalLegs[i], firs };
               changed = true;
             }
-          } catch (e) {
-            console.error('FIR fetch error:', e);
+          } catch (e: any) {
+            const errorMsg = e instanceof Error ? e.message : String(e);
+            console.error(`FIR fetch error: ${errorMsg}`);
           }
         }
 
         if (changed) {
           updateState(finalLegs);
         }
-      } catch (error) {
-        console.error('Final legs update error:', error);
+      } catch (error: any) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(`Final legs update error: ${errorMsg}`);
       } finally {
         if (isFinal) setLoading(false);
       }
@@ -375,8 +378,9 @@ export default function App() {
           console.log("Fuel Optimization Reasoning:", result.reasoning);
         }
       }
-    } catch (error) {
-      console.error("Fuel optimization error:", error);
+    } catch (error: any) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`Fuel optimization error: ${errorMsg}`);
     } finally {
       setIsOptimizingFuel(false);
     }
@@ -420,8 +424,9 @@ export default function App() {
           handleLegsUpdate(newLegs, true);
         }
       }
-    } catch (error) {
-      console.error("Add fuel stop error:", error);
+    } catch (error: any) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`Add fuel stop error: ${errorMsg}`);
     } finally {
       setLoading(false);
     }
@@ -506,8 +511,9 @@ export default function App() {
           }
         }
       }
-    } catch (error) {
-      console.error('Map click search error:', error);
+    } catch (error: any) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`Map click search error: ${errorMsg}`);
       const code = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
       const coords = { lat, lng };
 
@@ -630,8 +636,9 @@ export default function App() {
         try {
           const agentsResult = await searchHandlingAgents(match.icao || match.iata || code, formData.aircraftPreference);
           handlingAgents = (agentsResult.agents || []).slice(0, 3);
-        } catch (err) {
-          console.error(`Error fetching handling agents for ${code}:`, err);
+        } catch (err: any) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          console.error(`Error fetching handling agents for ${code}: ${errorMsg}`);
         }
         
         setAirportDetails(prev => ({ 
@@ -639,8 +646,9 @@ export default function App() {
           [code.toUpperCase()]: { ...match, handlingAgents } 
         }));
       }
-    } catch (error) {
-      console.error(`Error fetching airport info for ${code}:`, error);
+    } catch (error: any) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`Error fetching airport info for ${code}: ${errorMsg}`);
     }
   };
 
@@ -801,18 +809,19 @@ export default function App() {
 
       // Save to Firebase
       try {
-        await addDoc(collection(db, 'quotes'), {
+        const quoteToSave = JSON.parse(safeStringify({
           ...formData,
           userId: user.uid,
           routeDetails,
           quoteOptions: options,
           createdAt: new Date().toISOString()
-        });
+        }));
+        await addDoc(collection(db, 'quotes'), quoteToSave);
       } catch (error) {
         handleFirestoreError(error, OperationType.CREATE, 'quotes');
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.error('Error:', safeStringify(error));
       alert('Failed to submit quote request.');
     } finally {
       setLoading(false);
@@ -843,7 +852,7 @@ export default function App() {
       const optimized = await getOptimizedRoute(formData.departure, formData.destination, routeData.firs);
       setOptimizedRoute(optimized);
     } catch (error) {
-      console.error('Error:', error);
+      console.error('Error:', safeStringify(error));
       alert('Failed to optimize route.');
     } finally {
       setLoading(false);
@@ -892,13 +901,14 @@ export default function App() {
     
     setIsSavingQuote(true);
     try {
-      await addDoc(collection(db, 'quote_history'), {
+      const entryToSave = JSON.parse(safeStringify({
         user_id: user.uid,
         quote_data: acmiQuote,
         created_at: new Date().toISOString(),
         type: 'ACMI',
         status: 'Saved'
-      });
+      }));
+      await addDoc(collection(db, 'quote_history'), entryToSave);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (error) {

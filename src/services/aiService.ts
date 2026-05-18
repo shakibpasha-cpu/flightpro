@@ -3523,7 +3523,8 @@ export async function getDetailedPDFReportData(departure: string, destination: s
       "icao": string, "iata": string, "elevationFt": number, "runways": string,
       "parkingInfo": string, "jetTubesAvailable": boolean,
       "estimatedCharges": { "terminal": number, "parking": number, "nightParking": number },
-      "handlingAgencies": [{ "name": string, "services": string }],
+      "handlingAgencies": [{ "name": string, "services": string, "contact": string, "isRecommended": boolean }],
+      "localAuthorities": { "caa": string, "caaContact": string, "airportManager": string, "airportManagerContact": string },
       "caaInfo": { "name": string, "url": string },
       "aipInfo": { "url": string }
     },
@@ -3535,7 +3536,8 @@ export async function getDetailedPDFReportData(departure: string, destination: s
       "icao": string, "iata": string, "elevationFt": number, "runways": string,
       "parkingInfo": string, "jetTubesAvailable": boolean,
       "estimatedCharges": { "terminal": number, "parking": number, "nightParking": number },
-      "handlingAgencies": [{ "name": string, "services": string }],
+      "handlingAgencies": [{ "name": string, "services": string, "contact": string, "isRecommended": boolean }],
+      "localAuthorities": { "caa": string, "caaContact": string, "airportManager": string, "airportManagerContact": string },
       "caaInfo": { "name": string, "url": string },
       "aipInfo": { "url": string }
     },
@@ -3546,13 +3548,13 @@ export async function getDetailedPDFReportData(departure: string, destination: s
       "catering": string, "profitMargin": string
     },
     "mroSuggestions": [
-      { "name": string, "airport": string, "capabilities": string[], "rating": number }
+      { "name": string, "airport": string, "capabilities": string[], "rating": number, "contact": string }
     ],
     "cateringSuggestions": [
-      { "name": string, "airport": string, "capabilities": string[], "rating": number }
+      { "name": string, "airport": string, "capabilities": string[], "rating": number, "contact": string }
     ],
     "fuelSuggestions": [
-      { "name": string, "airport": string, "providerType": string, "rating": number }
+      { "name": string, "airport": string, "providerType": string, "rating": number, "contact": string }
     ]
   }
   
@@ -4125,47 +4127,47 @@ export async function getIataComplianceSuggestion(missionParams: {
   sectors: number;
   isMultiCrew?: boolean;
 }) {
-  const prompt = `Act as an expert Aviation Compliance Officer specialized in IATA and EASA Flight Time Limitations (FTL).
+  const prompt = `Act as a senior FTL (Flight Time Limitations) Auditor specializing in EASA ORO.FTL and IATA standards.
   
-  MISSION DETAILS:
+  MISSION PARAMETERS:
   - Departure: ${missionParams.departure}
   - Destination: ${missionParams.destination}
   - Reporting Time: ${missionParams.reportingTime}
-  - Chock On Time: ${missionParams.chockOnTime}
-  - Flying Time (Block Hours): ${missionParams.flyingTime}
-  - Number of Sectors: ${missionParams.sectors}
-  - Current Crew Setup: ${missionParams.isMultiCrew ? 'Multi-Crew (3+ pilots)' : 'Standard (2 pilots)'}
+  - Chock-On Time: ${missionParams.chockOnTime}
+  - Flying Time: ${missionParams.flyingTime} hours
+  - Sectors: ${missionParams.sectors}
+  - Configuration: ${missionParams.isMultiCrew ? 'Augmented (Multi-crew)' : 'Minimum (2-pilot)'}
   
-  TASK:
+  DIAGNOSIS REQUIRED:
   1. Calculate the Flight Duty Period (FDP).
-  2. Determine if the Duty is within legal limits for the current crew setup.
-  3. Suggest if "Multi-Crew" or "Augmented Crew" is required for this specific mission.
-  4. Calculate the MANDATORY rest period required after this duty before the next flight.
-  5. Suggest the EARLIEST possible time for the next flight (Next Fly After Rest).
-  6. Identify if there is "Over Time" (exceeding standard FDP) or if it's comfortably "Under Time".
+  2. Determine the legal limit for this duty start time and sector count.
+  3. Analyze if current configuration is legal or if multi-crew was MANDATORY.
+  4. Calculate mandatory REST required after duty.
+  5. Calculate EARLIEST NEXT DUTY START (Next fly after rest).
+  6. Margin analysis: Overtime or undertime remaining.
   
-  Return a JSON object:
+  Return strictly as a JSON object:
   {
-    "fdpCalculated": string,
-    "limitUsed": string,
+    "status": "Green" | "Yellow" | "Red",
     "isCompliant": boolean,
-    "status": "Within Limits" | "Margin" | "Exceeded",
+    "fdpCalculated": "string",
+    "limitUsed": "string",
+    "restRequired": "string",
+    "earliestNextDuty": "string",
     "recommendations": {
-      "crewAugmentation": "None" | "Augmented" | "Double Crew",
-      "restRequired": string,
-      "earliestNextDuty": string,
-      "overTimeUnderTime": string
+      "crewAugmentation": "string",
+      "restRequired": "string",
+      "overTimeUnderTime": "string",
+      "earliestNextDuty": "string"
     },
     "reasoning": "string",
     "iataLawsReference": "string"
-  }
-  
-  Ensure calculations follow IATA/EASA subpart FTL standards strictly.`;
+  }`;
 
   try {
     const ai = getAI();
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: prompt,
       config: {
         responseMimeType: "application/json",

@@ -78,7 +78,47 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
   const [detailedFirs, setDetailedFirs] = useState<Record<string, any>>({});
   const [loadingFirs, setLoadingFirs] = useState<Record<string, boolean>>({});
   const [showDetailedBreakdown, setShowDetailedBreakdown] = useState(false);
-  
+  const [showCustomAircraftForm, setShowCustomAircraftForm] = useState(false);
+  const [customAircraftForm, setCustomAircraftForm] = useState({
+    name: '',
+    maxPassengers: 12,
+    maxPayload: 2500,
+    range: 3500,
+    speed: 450,
+    hourlyRate: 8500,
+    fuelBurnPerHour: 1200,
+    homeBase: ''
+  });
+  const [userAircraftList, setUserAircraftList] = useState<any[]>([]);
+
+  const handleAddCustomAircraft = () => {
+    if (!customAircraftForm.name) {
+      alert('Please enter an aircraft name.');
+      return;
+    }
+    const newAircraft = {
+      ...customAircraftForm,
+      id: `custom-${Object.keys(userAircraftList).length}-${Date.now()}`,
+      type: customAircraftForm.name,
+      acmiRate: customAircraftForm.hourlyRate,
+      fuelBurnPerHour: customAircraftForm.fuelBurnPerHour,
+      operator: 'Manual Entry',
+      operatorName: 'User Defined',
+      isCustom: true
+    };
+    setUserAircraftList([...userAircraftList, newAircraft]);
+    setShowCustomAircraftForm(false);
+    setSelectedAircraftId(newAircraft.id);
+  };
+
+  const removeUserAircraft = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setUserAircraftList(userAircraftList.filter(a => a.id !== id));
+    if (selectedAircraftId === id) setSelectedAircraftId('');
+  };
+
+  const combinedAircraftList = [...aircraftList, ...userAircraftList];
+
   const [isOptimizingRoute, setIsOptimizingRoute] = useState(false);
   const [routeOptimization, setRouteOptimization] = useState<any>(null);
 
@@ -104,7 +144,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
     }
   };
 
-  const selectedAircraft = aircraftList.find(a => a.id === selectedAircraftId);
+  const selectedAircraft = combinedAircraftList.find(a => a.id === selectedAircraftId);
 
   useEffect(() => {
     setEngineResult(null);
@@ -234,7 +274,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
           riskLevel,
           aircraftBase,
           isEmptyLeg
-        }, targetAircraftId, aircraftList);
+        }, targetAircraftId, combinedAircraftList);
         setAlternatives(suggested);
       } catch (altError) {
         console.warn('Failed to fetch alternatives:', altError);
@@ -466,17 +506,46 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
         finalY = (doc as any).lastAutoTable.finalY + 10;
         
         if (detailedData.departureInfo?.handlingAgencies?.length > 0) {
-          doc.text('Handling Agencies:', 14, finalY);
+          doc.setFontSize(11);
+          doc.text('A. Handling Specializations', 14, finalY);
           finalY += 5;
-          detailedData.departureInfo.handlingAgencies.forEach((agency: any) => {
-            doc.text(`- ${agency.name}: ${agency.services}`, 14, finalY);
-            finalY += 5;
+          
+          autoTable(doc, {
+            startY: finalY,
+            head: [['Agent Name', 'Services', 'Contact', 'Status']],
+            body: detailedData.departureInfo.handlingAgencies.map((agency: any) => [
+              agency.name,
+              agency.services,
+              agency.contact || '-',
+              agency.isRecommended ? '★ RECOMMENDED' : 'Active'
+            ]),
+            theme: 'grid',
+            headStyles: { fillColor: [79, 70, 229] },
+            columnStyles: {
+              3: { fontStyle: 'bold', textColor: [79, 70, 229] }
+            }
           });
+          finalY = (doc as any).lastAutoTable.finalY + 10;
+        }
+
+        if (detailedData.departureInfo?.localAuthorities) {
+          doc.setFontSize(11);
+          doc.text('B. Local Authority Contacts', 14, finalY);
           finalY += 5;
+          const auth = detailedData.departureInfo.localAuthorities;
+          autoTable(doc, {
+            startY: finalY,
+            body: [
+              ['Civil Aviation Authority', auth.caa || 'Main CAA', auth.caaContact || '-'],
+              ['Airport Manager', auth.airportManager || 'Manager Office', auth.airportManagerContact || '-']
+            ],
+            theme: 'striped'
+          });
+          finalY = (doc as any).lastAutoTable.finalY + 12;
         }
 
         doc.setTextColor(0,0,255);
-        if (detailedData.departureInfo?.caaInfo?.url) doc.textWithLink(`CAA Info: ${detailedData.departureInfo.caaInfo.name}`, 14, finalY, { url: detailedData.departureInfo.caaInfo.url });
+        if (detailedData.departureInfo?.caaInfo?.url) doc.textWithLink(`CAA Website: ${detailedData.departureInfo.caaInfo.name}`, 14, finalY, { url: detailedData.departureInfo.caaInfo.url });
         finalY += 6;
         if (detailedData.departureInfo?.aipInfo?.url) doc.textWithLink('AIP Info Source', 14, finalY, { url: detailedData.departureInfo.aipInfo.url });
         doc.setTextColor(0,0,0);
@@ -484,7 +553,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
         finalY += 15;
         
         // FIRs and Enroute Profile
-        if (finalY > 250) { doc.addPage(); finalY = 20; }
+        if (finalY > 240) { doc.addPage(); finalY = 20; }
         doc.setFontSize(14);
         doc.setTextColor(79, 70, 229);
         doc.text('2. Enroute Flight Profile & FIR Analysis', 14, finalY);
@@ -501,7 +570,8 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
             body: detailedData.enrouteProfile.firs.map((fir: any) => [
               fir.name || '-', fir.code || '-', `$${fir.estimatedCharges || 0}`, `${fir.permitProcedure || '-'} (${fir.leadTime || '-'})`
             ]),
-            theme: 'striped'
+            theme: 'striped',
+            headStyles: { fillColor: [79, 70, 229] }
           });
           finalY = (doc as any).lastAutoTable.finalY + 15;
         }
@@ -527,17 +597,45 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
         finalY = (doc as any).lastAutoTable.finalY + 10;
         
         if (detailedData.arrivalInfo?.handlingAgencies?.length > 0) {
-          doc.text('Handling Agencies:', 14, finalY);
+          doc.setFontSize(11);
+          doc.text('A. Handling Specializations', 14, finalY);
           finalY += 5;
-          detailedData.arrivalInfo.handlingAgencies.forEach((agency: any) => {
-            doc.text(`- ${agency.name}: ${agency.services}`, 14, finalY);
-            finalY += 5;
+          autoTable(doc, {
+            startY: finalY,
+            head: [['Agent Name', 'Services', 'Contact', 'Status']],
+            body: detailedData.arrivalInfo.handlingAgencies.map((agency: any) => [
+              agency.name,
+              agency.services,
+              agency.contact || '-',
+              agency.isRecommended ? '★ RECOMMENDED' : 'Active'
+            ]),
+            theme: 'grid',
+            headStyles: { fillColor: [79, 70, 229] },
+            columnStyles: {
+              3: { fontStyle: 'bold', textColor: [79, 70, 229] }
+            }
           });
+          finalY = (doc as any).lastAutoTable.finalY + 10;
+        }
+
+        if (detailedData.arrivalInfo?.localAuthorities) {
+          doc.setFontSize(11);
+          doc.text('B. Local Authority Contacts', 14, finalY);
           finalY += 5;
+          const authArr = detailedData.arrivalInfo.localAuthorities;
+          autoTable(doc, {
+            startY: finalY,
+            body: [
+              ['Civil Aviation Authority', authArr.caa || 'Main CAA', authArr.caaContact || '-'],
+              ['Airport Manager', authArr.airportManager || 'Manager Office', authArr.airportManagerContact || '-']
+            ],
+            theme: 'striped'
+          });
+          finalY = (doc as any).lastAutoTable.finalY + 12;
         }
 
         doc.setTextColor(0,0,255);
-        if (detailedData.arrivalInfo?.caaInfo?.url) doc.textWithLink(`CAA Info: ${detailedData.arrivalInfo.caaInfo.name}`, 14, finalY, { url: detailedData.arrivalInfo.caaInfo.url });
+        if (detailedData.arrivalInfo?.caaInfo?.url) doc.textWithLink(`CAA Website: ${detailedData.arrivalInfo.caaInfo.name}`, 14, finalY, { url: detailedData.arrivalInfo.caaInfo.url });
         finalY += 6;
         if (detailedData.arrivalInfo?.aipInfo?.url) doc.textWithLink('AIP Info Source', 14, finalY, { url: detailedData.arrivalInfo.aipInfo.url });
         doc.setTextColor(0,0,0);
@@ -582,9 +680,9 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
           finalY += 5;
           autoTable(doc, {
             startY: finalY,
-            head: [['Provider Name', 'Airport', 'Capabilities', 'Rating']],
+            head: [['Provider Name', 'Airport', 'Capabilities', 'Contact', 'Rating']],
             body: detailedData.mroSuggestions.map((mro: any) => [
-              mro.name, mro.airport, mro.capabilities?.join(', ') || '-', `${mro.rating || '-'}/5`
+              mro.name, mro.airport, mro.capabilities?.join(', ') || '-', mro.contact || '-', `${mro.rating || '-'}/5`
             ]),
             theme: 'striped',
             headStyles: { fillColor: [100, 100, 100] }
@@ -600,9 +698,9 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
           finalY += 5;
           autoTable(doc, {
             startY: finalY,
-            head: [['Provider Name', 'Airport', 'Capabilities', 'Rating']],
+            head: [['Provider Name', 'Airport', 'Capabilities', 'Contact', 'Rating']],
             body: detailedData.cateringSuggestions.map((cat: any) => [
-              cat.name, cat.airport, cat.capabilities?.join(', ') || '-', `${cat.rating || '-'}/5`
+              cat.name, cat.airport, cat.capabilities?.join(', ') || '-', cat.contact || '-', `${cat.rating || '-'}/5`
             ]),
             theme: 'striped',
             headStyles: { fillColor: [100, 100, 100] }
@@ -618,9 +716,9 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
           finalY += 5;
           autoTable(doc, {
             startY: finalY,
-            head: [['Provider Name', 'Airport', 'Type', 'Rating']],
+            head: [['Provider Name', 'Airport', 'Type', 'Contact', 'Rating']],
             body: detailedData.fuelSuggestions.map((fuel: any) => [
-              fuel.name, fuel.airport, fuel.providerType || 'Fuel Provider', `${fuel.rating || '-'}/5`
+              fuel.name, fuel.airport, fuel.providerType || 'Fuel Provider', fuel.contact || '-', `${fuel.rating || '-'}/5`
             ]),
             theme: 'striped',
             headStyles: { fillColor: [100, 100, 100] }
@@ -660,6 +758,109 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
+      {/* Custom Aircraft Form Modal */}
+      <AnimatePresence>
+        {showCustomAircraftForm && (
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-gray-900 w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl border border-white/20"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-indigo-600 text-white rounded-2xl shadow-lg shadow-indigo-200 dark:shadow-none">
+                      <Plane size={24} />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Custom Aircraft Specs</h3>
+                      <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em] mt-1">Manual Pricing Parameters</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowCustomAircraftForm(false)}
+                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all text-gray-400"
+                  >
+                    <PlusCircle size={24} className="rotate-45" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Aircraft Name/Model</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g., Global 7500 Custom"
+                      value={customAircraftForm.name}
+                      onChange={e => setCustomAircraftForm({...customAircraftForm, name: e.target.value})}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Home Base (ICAO)</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g., VHHH"
+                      value={customAircraftForm.homeBase}
+                      onChange={e => setCustomAircraftForm({...customAircraftForm, homeBase: e.target.value.toUpperCase()})}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Max Passengers</label>
+                    <input 
+                      type="number" 
+                      value={customAircraftForm.maxPassengers}
+                      onChange={e => setCustomAircraftForm({...customAircraftForm, maxPassengers: Number(e.target.value)})}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Hourly Rate (USD)</label>
+                    <input 
+                      type="number" 
+                      value={customAircraftForm.hourlyRate}
+                      onChange={e => setCustomAircraftForm({...customAircraftForm, hourlyRate: Number(e.target.value)})}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Fuel Burn (KG/H)</label>
+                    <input 
+                      type="number" 
+                      value={customAircraftForm.fuelBurnPerHour}
+                      onChange={e => setCustomAircraftForm({...customAircraftForm, fuelBurnPerHour: Number(e.target.value)})}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Range (NM)</label>
+                    <input 
+                      type="number" 
+                      value={customAircraftForm.range}
+                      onChange={e => setCustomAircraftForm({...customAircraftForm, range: Number(e.target.value)})}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-10 flex gap-4">
+                  <button 
+                    onClick={handleAddCustomAircraft}
+                    className="flex-1 bg-indigo-600 text-white p-5 rounded-2xl font-black uppercase tracking-widest text-sm hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 shadow-xl"
+                  >
+                    <PlusCircle size={18} />
+                    Add Aircraft to Pricing Model
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-black text-gray-900 dark:text-white uppercase tracking-tight">ACMI Pricing Engine</h2>
@@ -933,7 +1134,15 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
               </div>
 
               <div className="space-y-1">
-                <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Select Aircraft Listing</label>
+                <div className="flex items-center justify-between ml-1">
+                  <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Select Aircraft Listing</label>
+                  <button 
+                    onClick={() => setShowCustomAircraftForm(true)}
+                    className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest hover:underline flex items-center gap-1"
+                  >
+                    <PlusCircle size={10} /> Add Custom
+                  </button>
+                </div>
                 <div className="relative">
                   <Plane className="absolute left-3 top-3 text-gray-400" size={16} />
                   <select 
@@ -942,7 +1151,7 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
                     className="w-full pl-10 p-2.5 bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:text-white text-sm font-bold appearance-none"
                   >
                     <option value="">Select an aircraft...</option>
-                    {aircraftList.filter(a => {
+                    {combinedAircraftList.filter(a => {
                       if (missionType === 'Cargo') return (a.maxPayload || 0) >= payload;
                       if (missionType === 'ACMI Lease') return true; // Show all for full lease search
                       return (a.maxPassengers || 0) >= passengers;

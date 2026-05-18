@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plane, Clock, DollarSign, ShieldCheck, Zap, Star, Loader2, Info, ChevronDown, ChevronUp, MessageSquare, Send, Map as MapIcon, Route, FileText, Tag, Search, Globe, UserCheck, Fuel, ParkingCircle, RefreshCw, Sparkles, Package, Layers, User, Keyboard, Navigation, Moon, X, ChevronRight, Mail, Phone, Cloud } from 'lucide-react';
+import { Plane, Clock, DollarSign, ShieldCheck, Zap, Star, Loader2, Info, ChevronDown, ChevronUp, MessageSquare, Send, Map as MapIcon, Route, FileText, Tag, Search, Globe, UserCheck, Fuel, ParkingCircle, RefreshCw, Sparkles, Package, Layers, User, Keyboard, Navigation, Moon, X, Plus, ChevronRight, Mail, Phone, Cloud } from 'lucide-react';
 import { generateCharterQuotes, parseNaturalLanguageQuote, getCommercialViabilitySuggestion, generateACMIQuote, getFlightRouteDetails, getSuggestedAircraft, searchHandlingAgents } from '../services/aiService';
 import { generateQuotePDF } from '../utils/pdfGenerator';
 import { safeStringify } from '../utils/safeJson';
@@ -74,6 +74,50 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
   const [acmiQuote, setAcmiQuote] = useState<any>(null);
   const [isGeneratingACMI, setIsGeneratingACMI] = useState(false);
   const [expandedQuote, setExpandedQuote] = useState<string | null>(null);
+  const [showCustomAircraftForm, setShowCustomAircraftForm] = useState(false);
+  const [customAircraftForm, setCustomAircraftForm] = useState({
+    name: '',
+    maxPassengers: 12,
+    maxPayload: 2500,
+    range: 3500,
+    speed: 450,
+    hourlyRate: 8500,
+    fuelBurnPerHour: 1200,
+    homeBase: ''
+  });
+  const [userAircraftList, setUserAircraftList] = useState<any[]>([]);
+
+  const handleAddCustomAircraft = () => {
+    if (!customAircraftForm.name) {
+      alert('Please enter an aircraft name.');
+      return;
+    }
+    const newAircraft = {
+      ...customAircraftForm,
+      id: `custom-${Date.now()}`,
+      isCustom: true,
+      icao_type: customAircraftForm.name.substring(0, 4).toUpperCase(),
+      type: 'Private Jet', // Default
+      category: customAircraftForm.maxPassengers > 19 ? 'Heavy Jet' : (customAircraftForm.maxPassengers > 8 ? 'Super Midsize' : 'Light Jet'),
+      image: 'https://images.unsplash.com/photo-1540962351504-03099e0a754b?auto=format&fit=crop&q=80&w=800'
+    };
+    setUserAircraftList([...userAircraftList, newAircraft]);
+    setShowCustomAircraftForm(false);
+    setCustomAircraftForm({
+      name: '',
+      maxPassengers: 12,
+      maxPayload: 2500,
+      range: 3500,
+      speed: 450,
+      hourlyRate: 8500,
+      fuelBurnPerHour: 1200,
+      homeBase: ''
+    });
+  };
+
+  const removeUserAircraft = (id: string) => {
+    setUserAircraftList(userAircraftList.filter(a => a.id !== id));
+  };
 
   const handleGenerateACMI = async () => {
     if (!formData.departure || !formData.destination || !formData.aircraftPreference) {
@@ -185,7 +229,7 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
     
     setLoading(true);
     try {
-      await addDoc(collection(db, 'quotes'), {
+      const quoteToSave = JSON.parse(safeStringify({
         userId: auth.currentUser.uid,
         status: 'draft',
         legs: quote.waypoints.map((w: any, i: number) => {
@@ -202,7 +246,9 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
         }).filter(Boolean),
         totalCost: quote.total_price,
         createdAt: new Date().toISOString()
-      });
+      }));
+      
+      await addDoc(collection(db, 'quotes'), quoteToSave);
       alert('Quote saved successfully!');
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'quotes');
@@ -216,8 +262,9 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
     try {
       const suggestion = await getCommercialViabilitySuggestion(quotesData, formData);
       setAiSuggestion(suggestion);
-    } catch (error) {
-      console.error('Failed to get AI suggestion:', error);
+    } catch (error: any) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to get AI suggestion: ${errorMsg}`);
       alert('Failed to get AI suggestion. Please try again.');
     } finally {
       setAiSuggestionLoading(false);
@@ -364,6 +411,8 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
         }
       }
 
+      const combinedAircraftList = [...aircraftList, ...userAircraftList];
+
       const result = await generateCharterQuotes({
         ...formData,
         missionType: missionType,
@@ -373,7 +422,7 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
         operatorMargin: Number(formData.operatorMargin) || 0,
         currentDate: new Date().toISOString(),
         airportsContext: airportsData // Pass enriched airport data
-      }, aircraftList);
+      }, combinedAircraftList);
       setQuotesData(result.data);
       setIsFallback(result.isFallback);
       setSelectedQuoteIdx(0); // Reset selection to first quote
@@ -581,6 +630,109 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
 
   return (
     <div className="space-y-8">
+      {/* Custom Aircraft Form Modal */}
+      <AnimatePresence>
+        {showCustomAircraftForm && (
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-gray-900 w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl border border-white/20"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-indigo-600 text-white rounded-2xl shadow-lg shadow-indigo-200 dark:shadow-none">
+                      <Plane size={24} />
+                    </div>
+                    <div>
+                      <h3 className="text-2xl font-black text-gray-900 dark:text-white tracking-tight">Configure Custom Aircraft</h3>
+                      <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-[0.2em] mt-1">Manual Performance Specification</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowCustomAircraftForm(false)}
+                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all text-gray-400"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Aircraft Name/Model</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g., Global 7500 Custom"
+                      value={customAircraftForm.name}
+                      onChange={e => setCustomAircraftForm({...customAircraftForm, name: e.target.value})}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Home Base (ICAO)</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g., VHHH"
+                      value={customAircraftForm.homeBase}
+                      onChange={e => setCustomAircraftForm({...customAircraftForm, homeBase: e.target.value.toUpperCase()})}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Max Passengers</label>
+                    <input 
+                      type="number" 
+                      value={customAircraftForm.maxPassengers}
+                      onChange={e => setCustomAircraftForm({...customAircraftForm, maxPassengers: Number(e.target.value)})}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Hourly Rate (USD)</label>
+                    <input 
+                      type="number" 
+                      value={customAircraftForm.hourlyRate}
+                      onChange={e => setCustomAircraftForm({...customAircraftForm, hourlyRate: Number(e.target.value)})}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Range (NM)</label>
+                    <input 
+                      type="number" 
+                      value={customAircraftForm.range}
+                      onChange={e => setCustomAircraftForm({...customAircraftForm, range: Number(e.target.value)})}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Cruise Speed (KTAS)</label>
+                    <input 
+                      type="number" 
+                      value={customAircraftForm.speed}
+                      onChange={e => setCustomAircraftForm({...customAircraftForm, speed: Number(e.target.value)})}
+                      className="w-full p-4 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-10 flex gap-4">
+                  <button 
+                    onClick={handleAddCustomAircraft}
+                    className="flex-1 bg-indigo-600 text-white p-5 rounded-2xl font-black uppercase tracking-widest text-sm hover:bg-indigo-700 transition-all flex items-center justify-center gap-3 shadow-xl"
+                  >
+                    <User size={18} />
+                    Add Aircraft to Pricing Comparison
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Input Section */}
       <div className="bg-white dark:bg-gray-800 p-6 md:p-8 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
@@ -997,14 +1149,43 @@ export default function CharterQuoteEngine({ aircraftList, isDarkMode = false }:
               </div>
             )}
             <div className="space-y-1 lg:col-span-2">
-              <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest ml-1">Aircraft Preference (Optional)</label>
-              <input 
-                type="text" 
-                placeholder={missionType === 'Passenger' ? "e.g., Heavy Jet, B777-300ER, Global 6000" : "e.g., Boeing 747-8F, A330-200F, IL-76"}
-                value={formData.aircraftPreference}
-                onChange={e => setFormData({...formData, aircraftPreference: e.target.value})}
-                className="w-full p-4 bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm font-bold text-gray-900 dark:text-white outline-none"
-              />
+              <div className="flex items-center justify-between ml-1">
+                <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Aircraft Preference (Optional)</label>
+                <button 
+                  type="button"
+                  onClick={() => setShowCustomAircraftForm(true)}
+                  className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest hover:underline flex items-center gap-1"
+                >
+                  <Plus size={10} /> Add Custom Aircraft
+                </button>
+              </div>
+              <div className="space-y-2">
+                <input 
+                  type="text" 
+                  placeholder={missionType === 'Passenger' ? "e.g., Heavy Jet, B777-300ER, Global 6000" : "e.g., Boeing 747-8F, A330-200F, IL-76"}
+                  value={formData.aircraftPreference}
+                  onChange={e => setFormData({...formData, aircraftPreference: e.target.value})}
+                  className="w-full p-4 bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-800 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all text-sm font-bold text-gray-900 dark:text-white outline-none"
+                />
+                
+                {userAircraftList.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {userAircraftList.map(a => (
+                      <div key={a.id} className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-100 dark:border-indigo-800/50 rounded-lg group">
+                        <Plane size={12} className="text-indigo-600 dark:text-indigo-400" />
+                        <span className="text-[10px] font-black text-indigo-700 dark:text-indigo-300 uppercase tracking-tight">{a.name}</span>
+                        <button 
+                          type="button" 
+                          onClick={() => removeUserAircraft(a.id)}
+                          className="text-indigo-300 hover:text-red-500 transition-colors"
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             
             <div className="space-y-1">

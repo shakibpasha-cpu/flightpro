@@ -30,28 +30,19 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+  const errInfo: any = {
+    error: error instanceof Error ? error.message : safeStringify(error),
     authInfo: {
       userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
+      email: auth.currentUser?.email
     },
     operationType,
     path
   };
-  const errorMessage = safeStringify(errInfo);
-
-  console.error('Firestore Error: ', errorMessage);
-  throw new Error(errorMessage);
+  const message = error instanceof Error ? error.message : safeStringify(error);
+  console.error('Firestore Error details: ', safeStringify(errInfo));
+  
+  throw new Error(`Firestore Error [${operationType}]: ${message}`);
 }
 
 export interface ApiErrorInfo {
@@ -80,7 +71,7 @@ export function handleApiError(error: unknown, service: string, endpoint?: strin
     timestamp: new Date().toISOString()
   };
 
-  console.error(`API Error [${service}]:`, safeStringify(errInfo));
+  console.error(`API Error [${service}]:`, message);
   
   if (silent) return;
 

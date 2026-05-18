@@ -3,6 +3,7 @@ import { Plane, MapPin, Calendar, Users, Weight, Plus, Trash2, Save, Edit2, Chev
 import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, query, orderBy, where } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../services/errorService';
+import { safeStringify } from '../utils/safeJson';
 import { onAuthStateChanged } from 'firebase/auth';
 import FlightMap from './FlightMap';
 import { searchAirports, getLegFIRAnalysis, getFIRDetails, fetchFIRRules, getOperationalRiskAssessment, getAirportDetails, searchHandlingAgents, enrichHandlingAgent, analyzePermits, analyzeFlightPlan } from '../services/aiService';
@@ -214,7 +215,8 @@ export default function MultiLegFlightPlanner() {
   };
 
   const handleError = (error: any, context: string) => {
-    console.error(`Error in ${context}:`, error);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`Error in ${context}: ${errorMsg}`);
     let message = `Something went wrong during ${context}.`;
     
     if (error?.message?.includes('Quota exceeded')) {
@@ -260,8 +262,9 @@ export default function MultiLegFlightPlanner() {
         ...prev,
         [icao]: { ...prev[icao], ...updates }
       }));
-    } catch (error) {
-      console.error("Error updating airport info:", error);
+    } catch (error: any) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`Error updating airport info: ${errorMsg}`);
     } finally {
       setIsSavingAirport(prev => ({ ...prev, [icao]: false }));
     }
@@ -459,8 +462,9 @@ export default function MultiLegFlightPlanner() {
             
             if (details) setAirportDetails(prev => ({ ...prev, [icao]: details }));
             if (handling) setAirportHandling(prev => ({ ...prev, [icao]: handling }));
-          } catch (error) {
-            console.error(`Error fetching tech data for ${icao}:`, error);
+          } catch (error: any) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`Error fetching tech data for ${icao}: ${errorMsg}`);
           } finally {
             setFetchingTechData(prev => ({ ...prev, [icao]: false }));
           }
@@ -511,8 +515,9 @@ export default function MultiLegFlightPlanner() {
           totalFlightTime
         });
       }
-    } catch (error) {
-      console.error('Map click error in MultiLegPlanner:', error);
+    } catch (error: any) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`Map click error in MultiLegPlanner: ${errorMsg}`);
     }
   };
 
@@ -818,8 +823,9 @@ export default function MultiLegFlightPlanner() {
         });
       }, 2000);
 
-    } catch (error) {
-      console.error('Apply Strategy Error:', error);
+    } catch (error: any) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`Apply Strategy Error: ${errorMsg}`);
     } finally {
       setAnalyzingFullPlan(false);
     }
@@ -1851,22 +1857,24 @@ export default function MultiLegFlightPlanner() {
 
     try {
       const { updatedLegs, totalCost, totalDistance, totalFlightTime } = calculateMetrics(editingPlan.legs);
-      const planToSave = {
+      
+      // Use safeStringify + parse to ensure we're saving a clean POJO without circularities
+      const cleanedPlan = JSON.parse(safeStringify({
         ...editingPlan,
         legs: updatedLegs,
         totalCost,
         totalDistance,
         totalFlightTime,
         updatedAt: new Date().toISOString()
-      };
+      }));
 
-      if (planToSave.id) {
-        const docRef = doc(db, 'flight_plans', planToSave.id);
-        await updateDoc(docRef, planToSave);
+      if (cleanedPlan.id) {
+        const docRef = doc(db, 'flight_plans', cleanedPlan.id);
+        await updateDoc(docRef, cleanedPlan);
       } else {
-        planToSave.createdAt = new Date().toISOString();
-        planToSave.userId = userId || '';
-        await addDoc(collection(db, 'flight_plans'), planToSave);
+        cleanedPlan.createdAt = new Date().toISOString();
+        cleanedPlan.userId = userId || '';
+        await addDoc(collection(db, 'flight_plans'), cleanedPlan);
       }
       
       setEditingPlan(null);
