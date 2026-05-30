@@ -5,6 +5,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { calculateACMIMission, MissionParams, ACMIEngineResult, suggestCheaperAlternatives, calculateACMILease, LeaseResult } from '../services/acmiEngineService';
 import { getFIRDetails, getDetailedPDFReportData } from '../services/aiService';
+import SafetyRiskAnalysis from './SafetyRiskAnalysis';
 
 interface Aircraft {
   id: string;
@@ -471,18 +472,69 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
       doc.setTextColor(100, 100, 100);
       doc.text(`Generated on: ${timestamp}`, 105, 28, { align: 'center' });
 
-      // Visual Map Placeholder / Route Header
+      // Visual Route & Mission Summary Header
+      let finalY = 35;
+      
       doc.setFillColor(245, 247, 255);
-      doc.rect(14, 35, 182, 20, 'F');
-      doc.setFontSize(12);
+      doc.rect(14, finalY, 182, 45, 'F');
+      
+      const distance = detailedData?.routeOverview?.distanceNM || engineResult?.routeDetails?.distance || 0;
+      const flightTime = engineResult?.routeDetails?.estimatedTimeHours ? `${engineResult.routeDetails.estimatedTimeHours.toFixed(2)} Hrs` : 'N/A';
+      const acftInfo = selectedAircraft ? `${selectedAircraft.type} (${selectedAircraft.category || 'Aircraft'})` : 'N/A';
+      
+      doc.setFontSize(14);
+      doc.setTextColor(79, 70, 229);
+      doc.text('I. FLIGHT SUMMARY & ROUTE PLAN', 20, finalY + 8);
+      
+      doc.setFontSize(10);
       doc.setTextColor(0, 0, 0);
-      if (detailedData?.routeOverview) {
-        doc.text(`FLIGHT ROUTE: ${departure} to ${destination} | DISTANCE: ${detailedData.routeOverview.distanceNM} NM`, 105, 47, { align: 'center' });
-      } else {
-        doc.text(`FLIGHT ROUTE: ${departure} to ${destination}`, 105, 47, { align: 'center' });
-      }
+      doc.text(`Aircraft: ${acftInfo}`, 20, finalY + 18);
+      doc.text(`Distance: ${distance} NM`, 20, finalY + 24);
+      doc.text(`Flight Time: ${flightTime}`, 20, finalY + 30);
+      if (missionType) doc.text(`Mission: ${missionType}`, 20, finalY + 36);
 
-      let finalY = 65;
+      // Graphical Map / Route Representation
+      doc.setDrawColor(79, 70, 229);
+      doc.setLineWidth(1);
+      doc.line(100, finalY + 22, 180, finalY + 22);
+      
+      // Dep Node
+      doc.setFillColor(79, 70, 229);
+      doc.circle(100, finalY + 22, 2.5, 'F');
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.text(departure, 100, finalY + 30, { align: 'center' });
+      
+      // Arr Node
+      doc.circle(180, finalY + 22, 2.5, 'F');
+      doc.text(destination, 180, finalY + 30, { align: 'center' });
+      
+      // FIR Nodes
+      if (detailedData?.enrouteProfile?.firs && detailedData.enrouteProfile.firs.length > 0) {
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(100, 100, 100);
+        const numFirs = Math.min(detailedData.enrouteProfile.firs.length, 3);
+        const segment = 80 / (numFirs + 1);
+        for (let i = 0; i < numFirs; i++) {
+          const fir = detailedData.enrouteProfile.firs[i];
+          const x = 100 + (segment * (i + 1));
+          doc.setFillColor(255, 255, 255);
+          doc.setDrawColor(79, 70, 229);
+          doc.circle(x, finalY + 22, 1.5, 'FD');
+          
+          doc.text(fir.code || `FIR ${i+1}`, x, finalY + 18, { align: 'center' });
+        }
+        if (detailedData.enrouteProfile.firs.length > 3) {
+            doc.text(`+${detailedData.enrouteProfile.firs.length - 3} more`, 140, finalY + 34, { align: 'center' });
+        }
+      }
+      
+      // Reset defaults for remainder
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(0, 0, 0);
+
+      finalY += 55;
       
       if (detailedData) {
         // Departure Airport Info
@@ -1576,6 +1628,17 @@ export default function PricingEngine({ aircraftList, initialParams, initialAirc
                 </div>
               </div>
             </div>
+
+            {/* AI Safety Risk Analysis */}
+            {engineResult && (
+              <SafetyRiskAnalysis 
+                departure={departure} 
+                destination={destination} 
+                aircraftType={selectedAircraft?.type} 
+                date={date} 
+                flightTimeHours={engineResult.flightHours} 
+              />
+            )}
 
             {/* AI Route Optimization Suggestions */}
             {engineResult && (

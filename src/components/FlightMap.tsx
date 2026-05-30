@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAirportDetails, searchAirports, searchHandlingAgents, getLegFIRAnalysis } from '../services/aiService';
 import { getLiveWeather, getLiveNotams, MetarData, NotamData } from '../services/weatherService';
-import { Layers, Map as MapIcon, Compass, Wind, Shield, MapPin, Info, X, ChevronRight, ChevronDown, GripVertical, ListOrdered, Clock, Trash2, Plus, Globe, Plane, Route, Users, Sparkles, Loader2, Mail, Phone, ExternalLink, Cloud, Activity, MousePointer2, ShieldAlert } from 'lucide-react';
+import { Layers, Map as MapIcon, Compass, Wind, Shield, MapPin, AlertTriangle, Info, X, ChevronRight, ChevronDown, GripVertical, ListOrdered, Clock, Trash2, Plus, Globe, Plane, Route, Users, Sparkles, Loader2, Mail, Phone, ExternalLink, Cloud, Activity, MousePointer2, ShieldAlert } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { getGlobalRestrictedAirspaces, getLiveSafetyAlerts, RestrictedAirspace as GlobalRestrictedAirspace } from '../services/safetyService';
 import { CHART_LAYERS, DefaultIcon, getBearing, getMidpoint, calculateDistance, doesLegIntersectPolygon } from '../lib/mapConfig';
@@ -364,6 +364,7 @@ export default function FlightMap({
   const [localLegs, setLocalLegs] = useState<Leg[]>(legs || []);
   const [selectedLegIndex, setSelectedLegIndex] = useState<number | null>(null);
   const [showRestrictedAreas, setShowRestrictedAreas] = useState(true);
+  const [selectedAirspace, setSelectedAirspace] = useState<GlobalRestrictedAirspace | null>(null);
   const [globalRestrictedAirspaces, setGlobalRestrictedAirspaces] = useState<GlobalRestrictedAirspace[]>([]);
   const [showWeather, setShowWeather] = useState(true);
   const [showRisks, setShowRisks] = useState(true);
@@ -549,6 +550,21 @@ export default function FlightMap({
       iconAnchor: [16, 16]
     });
   };
+
+  const intersectedHazards = useMemo(() => {
+    if (!localLegs || localLegs.length === 0 || !globalRestrictedAirspaces || globalRestrictedAirspaces.length === 0) return [];
+    const hazards = new Set<GlobalRestrictedAirspace>();
+    
+    localLegs.forEach(leg => {
+      globalRestrictedAirspaces.forEach(as => {
+        if (doesLegIntersectPolygon(leg.departureCoords, leg.destinationCoords, as.coordinates)) {
+          hazards.add(as);
+        }
+      });
+    });
+    
+    return Array.from(hazards);
+  }, [localLegs, globalRestrictedAirspaces]);
 
   const waypoints = useMemo(() => {
     if (!localLegs || localLegs.length === 0) return [];
@@ -1153,6 +1169,46 @@ export default function FlightMap({
                 </div>
               </>
             )}
+          </motion.div>
+        </div>
+      )}
+
+      {/* Active Hazards Overlay */}
+      {intersectedHazards.length > 0 && showRestrictedAreas && (
+        <div className="absolute top-32 left-4 z-[1000] max-w-xs w-full pointer-events-auto">
+          <motion.div
+            initial={{ x: -50, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            className="bg-white/95 dark:bg-gray-900/95 backdrop-blur-md p-4 rounded-3xl border border-rose-100 dark:border-rose-900 shadow-2xl"
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 bg-rose-100 dark:bg-rose-900/40 rounded-xl">
+                <AlertTriangle size={18} className="text-rose-600 dark:text-rose-400" />
+              </div>
+              <div>
+                <h3 className="text-xs font-black text-rose-600 dark:text-rose-400 uppercase tracking-widest">Route Hazards</h3>
+                <p className="text-[10px] text-gray-500 font-bold uppercase">{intersectedHazards.length} Active Restrictions</p>
+              </div>
+            </div>
+            
+            <div className="max-h-[300px] overflow-y-auto space-y-2 custom-scrollbar pr-1">
+              {intersectedHazards.map((hazard, index) => (
+                <div key={index} className="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-800">
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-[10px] font-black text-gray-900 dark:text-white uppercase tracking-wider">{hazard.name}</span>
+                    <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400 uppercase">
+                      {hazard.severity}
+                    </span>
+                  </div>
+                  <p className="text-[9px] text-gray-500 tracking-tight leading-snug">
+                    {hazard.reason}
+                  </p>
+                  {hazard.activeUntil && (
+                    <p className="text-[8px] text-gray-400 mt-2 font-bold uppercase">Expires: {hazard.activeUntil}</p>
+                  )}
+                </div>
+              ))}
+            </div>
           </motion.div>
         </div>
       )}
@@ -2287,6 +2343,9 @@ export default function FlightMap({
               fillOpacity={0.4}
               weight={area.type === 'TFR' ? 2 : 1.5}
               dashArray={area.type === 'TFR' ? "10, 5" : "5, 10"}
+              eventHandlers={{
+                click: () => setSelectedAirspace(area)
+              }}
             >
               <Tooltip sticky>
                 <div className="p-2 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-100 dark:border-gray-700 max-w-xs">
@@ -2983,6 +3042,56 @@ export default function FlightMap({
           </div>
         </div>
       )}
+
+      {/* Airspace Details Sidebar */}
+      <AnimatePresence>
+        {selectedAirspace && (
+          <motion.div
+            initial={{ x: 300, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: 300, opacity: 0 }}
+            className="absolute top-0 right-0 h-full w-80 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md border-l border-gray-200 dark:border-gray-800 shadow-2xl z-[2000] p-6 overflow-y-auto"
+          >
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-lg font-black text-gray-900 dark:text-white uppercase tracking-tight">Airspace Details</h2>
+              <button 
+                onClick={() => setSelectedAirspace(null)} 
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
+                <X size={18} className="text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-[10px] font-black uppercase text-gray-400 mb-1">Name</h3>
+                <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedAirspace.name}</p>
+              </div>
+              <div>
+                <h3 className="text-[10px] font-black uppercase text-gray-400 mb-1">Type</h3>
+                <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedAirspace.type}</p>
+              </div>
+              <div>
+                <h3 className="text-[10px] font-black uppercase text-gray-400 mb-1">Reason</h3>
+                <p className="text-xs text-gray-700 dark:text-gray-300 italic leading-snug">{selectedAirspace.reason}</p>
+              </div>
+              <div>
+                <h3 className="text-[10px] font-black uppercase text-gray-400 mb-1">Severity</h3>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest ${
+                  selectedAirspace.severity === 'High' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                }`}>
+                  {selectedAirspace.severity}
+                </span>
+              </div>
+              {selectedAirspace.activeUntil && (
+                <div>
+                  <h3 className="text-[10px] font-black uppercase text-gray-400 mb-1">Expires</h3>
+                  <p className="text-xs font-bold text-gray-900 dark:text-white">{selectedAirspace.activeUntil}</p>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { handleFirestoreError, OperationType } from '../services/errorService';
 import AircraftPerformanceCharts from './AircraftPerformanceCharts';
 import AircraftComparisonCharts from './AircraftComparisonCharts';
+import MROComplianceReport from './MROComplianceReport';
 
 interface OperatorProfile {
   operator_name: string;
@@ -477,6 +478,13 @@ export default function AircraftDetailPage({ aircraft, onBack, onGenerateQuote, 
               </p>
             </div>
           </div>
+
+          {/* MRO Compliance Report */}
+          <MROComplianceReport 
+            aircraftType={aircraft.type} 
+            registration={aircraft.registration || 'N/A'}
+            currentMaintenanceStatus={aircraft.maintenanceStatus || 'Standard'}
+          />
 
           {/* Crew Details */}
           <div className="bg-white dark:bg-gray-800 p-6 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm space-y-4">

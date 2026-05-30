@@ -286,8 +286,8 @@ export async function getFlightRouteDetails(departure: string, destination: stri
 }
 
 
-export async function getOptimizedRoute(departure: string, destination: string, currentFirs: any[], aircraftPerformance?: any, optimizationCriteria?: string, dateTime?: string) {
-  const cacheId = `opt_${departure.toUpperCase()}_${destination.toUpperCase()}_${(optimizationCriteria || 'balanced').toLowerCase().replace(/\s+/g, '_')}_${(dateTime || '').replace(/[^a-z0-9]/g, '_')}`.toLowerCase();
+export async function getOptimizedRoute(departure: string, destination: string, currentFirs: any[], aircraftPerformance?: any, optimizationCriteria?: string, dateTime?: string, preferredFlightLevel?: string) {
+  const cacheId = `opt_${departure.toUpperCase()}_${destination.toUpperCase()}_${(optimizationCriteria || 'balanced').toLowerCase().replace(/\s+/g, '_')}_${(dateTime || '').replace(/[^a-z0-9]/g, '_')}_${(preferredFlightLevel || '').replace(/[^a-z0-9]/g, '_')}`.toLowerCase();
 
   // 1. Try cache first
   try {
@@ -311,6 +311,7 @@ export async function getOptimizedRoute(departure: string, destination: string, 
   Current FIRs: ${safeStringify(currentFirs)}
   Aircraft Performance: ${safeStringify(aircraftPerformance)}
   User Preferred Optimization Criteria: ${optimizationCriteria || 'balanced (consider cost, time, and fuel)'}
+  ${preferredFlightLevel ? `User Preferred Flight Level (FL): ${preferredFlightLevel}. Please prioritize using this Flight Level or perform calculations optimized around this preference.` : ''}
   - IF 'cheapest': Prioritize minimizing all-up costs, including FIR fees and fuel.
   - IF 'fastest': Prioritize direct routing and higher flight levels even if fuel burn increases.
   - IF 'most fuel-efficient': Prioritize optimal flight levels based on wind patterns.

@@ -128,6 +128,12 @@ export default function MultiLegFlightPlanner() {
   const [editingPlan, setEditingPlan] = useState<FlightPlan | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [routeTemplates, setRouteTemplates] = useState<any[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(true);
+  const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newTemplateDesc, setNewTemplateDesc] = useState('');
+  const [activePlannerTab, setActivePlannerTab] = useState<'missions' | 'templates'>('missions');
   const [crewList, setCrewList] = useState<Crew[]>([]);
   const [showMap, setShowMap] = useState(true);
   const [resolvedAirports, setResolvedAirports] = useState<Record<string, { lat: number; lng: number }>>(airportCache);
@@ -1631,7 +1637,9 @@ export default function MultiLegFlightPlanner() {
       } else {
         setUserId(null);
         setPlans([]);
+        setRouteTemplates([]);
         setLoading(false);
+        setLoadingTemplates(false);
       }
     });
 
@@ -1651,6 +1659,7 @@ export default function MultiLegFlightPlanner() {
   useEffect(() => {
     if (userId) {
       fetchPlans();
+      fetchRouteTemplates();
     }
   }, [userId]);
 
@@ -1665,6 +1674,103 @@ export default function MultiLegFlightPlanner() {
       handleFirestoreError(error, OperationType.LIST, 'flight_plans');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchRouteTemplates = async () => {
+    if (!userId) return;
+    setLoadingTemplates(true);
+    try {
+      const q = query(collection(db, 'route_templates'), where('userId', '==', userId), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(q);
+      const templates = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setRouteTemplates(templates);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, 'route_templates');
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+
+  const handleSaveRouteTemplate = async () => {
+    if (!editingPlan) return;
+    if (!newTemplateName.trim()) {
+      showNotification("Please provide a name for the route template.", "warning");
+      return;
+    }
+    
+    try {
+      const simplifiedLegs = editingPlan.legs.map((leg, idx) => ({
+        id: leg.id || String(idx),
+        from: leg.from,
+        to: leg.to,
+        aircraftType: leg.aircraftType || 'A320',
+        passengers: leg.passengers || 0,
+        cargoWeight: leg.cargoWeight || 0
+      }));
+
+      const templatePayload = {
+        name: newTemplateName.trim(),
+        description: newTemplateDesc.trim(),
+        legs: simplifiedLegs,
+        userId: userId || '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      await addDoc(collection(db, 'route_templates'), templatePayload);
+      setShowSaveTemplateModal(false);
+      setNewTemplateName('');
+      setNewTemplateDesc('');
+      showNotification("Route Template successfully saved!", "success");
+      fetchRouteTemplates();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'route_templates');
+    }
+  };
+
+  const handleApplyTemplate = (template: any) => {
+    const today = new Date();
+    const getFutureDateStr = (daysAhead: number) => {
+      const date = new Date();
+      date.setDate(today.getDate() + daysAhead);
+      return date.toISOString().split('T')[0];
+    };
+
+    const templateLegs = template.legs.map((leg: any, idx: number) => ({
+      id: Date.now().toString() + '_' + idx,
+      from: leg.from,
+      to: leg.to,
+      date: getFutureDateStr(idx + 1),
+      etd: '09:00',
+      aircraftType: leg.aircraftType || 'A320',
+      passengers: leg.passengers || 0,
+      cargoWeight: leg.cargoWeight || 0
+    }));
+
+    const { updatedLegs, totalCost, totalDistance, totalFlightTime } = calculateMetrics(templateLegs);
+
+    setEditingPlan({
+      name: `${template.name} - Multi-leg Mission`,
+      legs: updatedLegs,
+      totalCost,
+      totalDistance,
+      totalFlightTime,
+      createdAt: new Date().toISOString()
+    });
+    setIsCreating(true);
+    showNotification(`Applied template: ${template.name}!`, "success");
+  };
+
+  const handleDeleteTemplate = async (templateId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('Are you sure you want to delete this route template?')) return;
+    try {
+      await deleteDoc(doc(db, 'route_templates', templateId));
+      showNotification("Route Template deleted.", "info");
+      fetchRouteTemplates();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'route_templates');
     }
   };
 
@@ -2047,6 +2153,22 @@ export default function MultiLegFlightPlanner() {
                   >
                     <span className="text-[10px] font-black text-rose-500 uppercase tracking-[0.2em] group-hover:scale-110 transition-transform">Terminate</span>
                     <span className="text-[8px] font-black text-gray-400 uppercase tracking-widest mt-[-2px]">Abort Sync</span>
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      if (!editingPlan || editingPlan.legs.length === 0) {
+                        showNotification("Cannot save empty route template", "warning");
+                        return;
+                      }
+                      setNewTemplateName(editingPlan.name || 'New Flight Mission Blueprint');
+                      setNewTemplateDesc('');
+                      setShowSaveTemplateModal(true);
+                    }} 
+                    className="relative group border-2 border-indigo-600 dark:border-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 text-indigo-600 dark:text-indigo-400 px-6 py-4 rounded-[1.3rem] text-xs font-black uppercase tracking-[0.2em] transition-all flex items-center gap-3 active:scale-95 border-b-4 hover:border-indigo-700/50"
+                  >
+                    <Save size={16} />
+                    Save Template
                   </button>
                   <button 
                     onClick={handleSavePlan} 
@@ -3707,50 +3829,236 @@ export default function MultiLegFlightPlanner() {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {plans.map(plan => (
-            <div key={plan.id} className="bg-white dark:bg-gray-800 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-xl p-6 hover:shadow-2xl transition-all group">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-lg font-black text-gray-900 dark:text-white">{plan.name}</h3>
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">{new Date(plan.createdAt).toLocaleDateString()}</p>
-                </div>
-                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => setEditingPlan(plan)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 size={14} /></button>
-                  <button onClick={() => handleDeletePlan(plan.id!)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
-                </div>
-              </div>
-
-              <div className="space-y-2 mb-4">
-                {plan.legs.slice(0, 3).map((leg, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300">
-                    <div className="w-4 h-4 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[8px]">{i+1}</div>
-                    {leg.from || '?'} <ChevronRight size={10} className="text-gray-400" /> {leg.to || '?'}
-                    <span className="ml-auto text-[10px] text-gray-400">{leg.aircraftType}</span>
-                  </div>
-                ))}
-                {plan.legs.length > 3 && <p className="text-[10px] font-bold text-gray-400 italic">+ {plan.legs.length - 3} more legs</p>}
-              </div>
-
-              <div className="pt-4 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center">
-                <div className="text-xs font-bold text-gray-500">
-                  {plan.legs.length} Legs
-                </div>
-                <div className="text-sm font-black text-indigo-600 dark:text-indigo-400">
-                  ${Math.round(plan.totalCost || 0).toLocaleString()}
-                </div>
-              </div>
+        <div className="space-y-6">
+          {/* TAB PIPELINE */}
+          <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-2">
+            <div className="flex gap-6">
+              <button
+                type="button"
+                onClick={() => setActivePlannerTab('missions')}
+                className={`pb-3 text-xs font-black uppercase tracking-[0.2em] relative transition-colors ${activePlannerTab === 'missions' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}
+              >
+                Active Missions ({plans.length})
+                {activePlannerTab === 'missions' && (
+                  <motion.div layoutId="activeTabUnderline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-600 dark:bg-indigo-400" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActivePlannerTab('templates')}
+                className={`pb-3 text-xs font-black uppercase tracking-[0.2em] relative transition-colors ${activePlannerTab === 'templates' ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}
+              >
+                Route Templates ({routeTemplates.length})
+                {activePlannerTab === 'templates' && (
+                  <motion.div layoutId="activeTabUnderline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-600 dark:bg-indigo-400" />
+                )}
+              </button>
             </div>
-          ))}
-          {plans.length === 0 && (
-            <div className="col-span-full py-12 text-center bg-gray-50 dark:bg-gray-900/50 rounded-3xl border border-dashed border-gray-200 dark:border-gray-700">
-              <Plane className="mx-auto h-8 w-8 text-gray-400 mb-3" />
-              <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-widest">No Flight Plans</h3>
-              <p className="text-xs text-gray-500 mt-1">Create your first multi-leg itinerary to get started.</p>
+          </div>
+
+          {activePlannerTab === 'missions' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fadeIn">
+              {plans.map(plan => (
+                <div key={plan.id} className="bg-white dark:bg-gray-800 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-xl p-6 hover:shadow-2xl transition-all group">
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h3 className="text-lg font-black text-gray-900 dark:text-white">{plan.name}</h3>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">{new Date(plan.createdAt).toLocaleDateString()}</p>
+                    </div>
+                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => setEditingPlan(plan)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 size={14} /></button>
+                      <button onClick={() => handleDeletePlan(plan.id!)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 mb-4">
+                    {plan.legs.slice(0, 3).map((leg, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300">
+                        <div className="w-4 h-4 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[8px]">{i+1}</div>
+                        {leg.from || '?'} <ChevronRight size={10} className="text-gray-400" /> {leg.to || '?'}
+                        <span className="ml-auto text-[10px] text-gray-400">{leg.aircraftType}</span>
+                      </div>
+                    ))}
+                    {plan.legs.length > 3 && <p className="text-[10px] font-bold text-gray-400 italic">+ {plan.legs.length - 3} more legs</p>}
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-100 dark:border-gray-700 flex justify-between items-center">
+                    <div className="text-xs font-bold text-gray-500">
+                      {plan.legs.length} Legs
+                    </div>
+                    <div className="text-sm font-black text-indigo-600 dark:text-indigo-400">
+                      ${Math.round(plan.totalCost || 0).toLocaleString()}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {plans.length === 0 && (
+                <div className="col-span-full py-12 text-center bg-gray-50 dark:bg-gray-900/50 rounded-3xl border border-dashed border-gray-200 dark:border-gray-700">
+                  <Plane className="mx-auto h-8 w-8 text-gray-400 mb-3" />
+                  <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-widest">No Flight Plans</h3>
+                  <p className="text-xs text-gray-500 mt-1">Create your first multi-leg itinerary to get started.</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fadeIn">
+              {routeTemplates.map(template => (
+                <div key={template.id} className="bg-white dark:bg-gray-800 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-xl p-6 hover:shadow-2xl transition-all group relative overflow-hidden flex flex-col justify-between">
+                  <div className="absolute -top-6 -right-6 w-20 h-20 bg-indigo-55 dark:bg-indigo-900/10 rounded-full opacity-50 group-hover:scale-125 duration-500" />
+                  
+                  <div>
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Plane size={12} className="text-indigo-600 dark:text-indigo-400 transform -rotate-45" />
+                          <span className="text-[9px] font-black tracking-widest text-indigo-600 dark:text-indigo-400 uppercase bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full">Aircraft Route Blueprint</span>
+                        </div>
+                        <h3 className="text-lg font-black text-gray-900 dark:text-white mt-1.5">{template.name}</h3>
+                        {template.description && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2 italic">“{template.description}”</p>
+                        )}
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Saved {new Date(template.createdAt || '').toLocaleDateString()}</p>
+                      </div>
+                      <div className="flex gap-2 z-10 transition-opacity">
+                        <button 
+                          onClick={(e) => handleDeleteTemplate(template.id, e)} 
+                          className="p-1.5 text-red-500 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-lg transition-colors"
+                          title="Delete Template"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 my-4">
+                      {template.legs.map((leg: any, i: number) => (
+                        <div key={i} className="flex items-center gap-2 text-xs font-bold text-gray-600 dark:text-gray-300">
+                          <div className="w-4 h-4 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 flex items-center justify-center text-[8px]">{i+1}</div>
+                          {leg.from || '?'} <ChevronRight size={10} className="text-gray-400" /> {leg.to || '?'}
+                          <span className="ml-auto text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded-md">{leg.aircraftType || 'A320'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between mt-auto">
+                    <span className="text-xs font-bold text-gray-500">
+                      {template.legs.length} Leg{template.legs.length !== 1 ? 's' : ''}
+                    </span>
+                    <button
+                      onClick={() => handleApplyTemplate(template)}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-md transition-all active:scale-95"
+                    >
+                      <Sparkles size={12} />
+                      Deploy Route
+                    </button>
+                  </div>
+                </div>
+              ))}
+              
+              {routeTemplates.length === 0 && (
+                <div className="col-span-full py-12 text-center bg-gray-50 dark:bg-gray-900/50 rounded-3xl border border-dashed border-gray-200 dark:border-gray-700">
+                  <Plane className="mx-auto h-8 w-8 text-indigo-400/80 mb-3 animate-pulse" />
+                  <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-widest">No Route Blueprints</h3>
+                  <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
+                    Design a multi-leg journey in the workspace, and select <strong className="text-indigo-600 dark:text-indigo-400 uppercase tracking-wider text-[10px]">"Save Template"</strong> to lock in a reusable flight pattern!
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
+
+      {/* Save Route Template Modal */}
+      <AnimatePresence>
+        {showSaveTemplateModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowSaveTemplateModal(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm shadow-inner"
+            />
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-gray-900 rounded-[2rem] border border-gray-100 dark:border-gray-800 p-8 w-full max-w-md shadow-2xl relative z-10 space-y-6"
+            >
+              <div className="flex justify-between items-center pb-4 border-b border-gray-100 dark:border-gray-800">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-indigo-50 dark:bg-indigo-900/30 rounded-xl">
+                    <Save size={16} className="text-indigo-600" />
+                  </div>
+                  <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-[0.2em]">Save As Template</h3>
+                </div>
+                <button 
+                  onClick={() => setShowSaveTemplateModal(false)}
+                  className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest font-mono">Template Name</label>
+                  <input
+                    type="text"
+                    value={newTemplateName}
+                    onChange={(e) => setNewTemplateName(e.target.value)}
+                    className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-100 dark:border-gray-800 rounded-xl px-4 py-3 text-xs font-bold text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder-gray-400"
+                    placeholder="e.g. Middle East Shuttle, European Tour"
+                    autoFocus
+                  />
+                </div>
+                
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest font-mono">Description (Optional)</label>
+                  <textarea
+                    value={newTemplateDesc}
+                    onChange={(e) => setNewTemplateDesc(e.target.value)}
+                    className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-100 dark:border-gray-800 rounded-xl px-4 py-3 text-xs font-bold text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all placeholder-gray-400 h-24 resize-none"
+                    placeholder="e.g. Routing optimized for cargo hub connections with short ground handling intervals."
+                  />
+                </div>
+
+                <div className="p-4 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100/30 rounded-2xl">
+                  <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest block mb-2 font-mono">Itinerary Structure</span>
+                  <div className="space-y-1.5 max-h-24 overflow-y-auto">
+                    {editingPlan?.legs.map((leg, idx) => (
+                      <div key={idx} className="flex items-center gap-2 text-[10px] font-black text-gray-500 dark:text-gray-400">
+                        <span className="w-3.5 h-3.5 rounded-full bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-400 flex items-center justify-center text-[8px] font-bold">{idx + 1}</span>
+                        <span>{leg.from || '?'} ➔ {leg.to || '?'}</span>
+                        <span className="ml-auto opacity-70 italic text-[9px] font-medium">{leg.aircraftType}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setShowSaveTemplateModal(false)}
+                  className="flex-1 px-4 py-3 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveRouteTemplate}
+                  className="flex-1 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all shadow-lg active:scale-95"
+                >
+                  Save Template
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showSummaryPanel && (

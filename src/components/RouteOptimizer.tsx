@@ -6,6 +6,8 @@ import { getOptimizedRoute } from '../services/aiService';
 interface RouteOptimizerProps {
   departure: string;
   destination: string;
+  onDepartureChange: (val: string) => void;
+  onDestinationChange: (val: string) => void;
   currentFirs?: any[];
   aircraftPerformance?: any;
   onApplyRoute?: (route: any) => void;
@@ -19,6 +21,8 @@ interface RouteOptimizerProps {
 export default function RouteOptimizer({ 
   departure, 
   destination, 
+  onDepartureChange,
+  onDestinationChange,
   currentFirs = [], 
   aircraftPerformance, 
   onApplyRoute,
@@ -32,18 +36,26 @@ export default function RouteOptimizer({
   const [optimization, setOptimization] = useState<any>(null);
   const [selectedAltIndex, setSelectedAltIndex] = useState(0);
   const [optimizationCriteria, setOptimizationCriteria] = useState<string>('balanced');
+  const [localDeparture, setLocalDeparture] = useState(departure);
+  const [localDestination, setLocalDestination] = useState(destination);
+  const [preferredFlightLevel, setPreferredFlightLevel] = useState<string>('');
 
   const handleOptimize = async () => {
     setOptimizing(true);
+    // In case user manually changed dep/arr, update parent too
+    if (localDeparture !== departure) onDepartureChange(localDeparture);
+    if (localDestination !== destination) onDestinationChange(localDestination);
+    
     try {
       // Use the more detailed optimizeRoute if we have extra params
       const result = await getOptimizedRoute(
-        departure, 
-        destination, 
+        localDeparture, 
+        localDestination, 
         currentFirs, 
         aircraftPerformance || { type: aircraftType }, 
         optimizationCriteria,
-        dateTime
+        dateTime,
+        preferredFlightLevel
       );
       setOptimization(result);
       setSelectedAltIndex(0);
@@ -58,36 +70,77 @@ export default function RouteOptimizer({
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-3xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
-      <div className="p-6 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-indigo-50/30 dark:bg-indigo-900/10">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200 dark:shadow-none">
-            <Zap size={20} />
-          </div>
-          <div>
-            <h3 className="font-black text-gray-900 dark:text-white uppercase tracking-tight">AI Route Optimizer</h3>
-            <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">Weather • FIR • Performance</p>
+      <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-indigo-50/30 dark:bg-indigo-900/10 space-y-4">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center shadow-lg shadow-indigo-200 dark:shadow-none">
+              <Zap size={20} />
+            </div>
+            <div>
+              <h3 className="font-black text-gray-900 dark:text-white uppercase tracking-tight">AI Route Optimizer</h3>
+              <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">Weather • FIR • Performance</p>
+            </div>
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          <select
-            value={optimizationCriteria}
-            onChange={(e) => setOptimizationCriteria(e.target.value)}
-            disabled={optimizing}
-            className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-bold rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value="balanced">Balanced (Cost, Time, Fuel)</option>
-            <option value="cheapest">Cheapest (Min Cost)</option>
-            <option value="fastest">Fastest (Min Time)</option>
-            <option value="most fuel-efficient">Most Fuel-Efficient</option>
-          </select>
-          <button
-            onClick={handleOptimize}
-            disabled={optimizing}
-            className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold text-xs hover:bg-indigo-700 transition flex items-center gap-2 disabled:opacity-50 shadow-lg shadow-indigo-100 dark:shadow-none"
-          >
-            {optimizing ? <Loader2 className="animate-spin" size={14} /> : <Zap size={14} />}
-            {optimization ? 'Re-Optimize' : 'Optimize Now'}
-          </button>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="flex flex-col gap-1">
+            <label className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Departure (ICAO)</label>
+            <input
+              type="text"
+              value={localDeparture}
+              onChange={(e) => setLocalDeparture(e.target.value)}
+              placeholder="e.g. LFPG"
+              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-bold rounded-xl px-3 py-2"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Destination (ICAO)</label>
+            <input
+              type="text"
+              value={localDestination}
+              onChange={(e) => setLocalDestination(e.target.value)}
+              placeholder="e.g. KJFK"
+              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-bold rounded-xl px-3 py-2"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Preferred Flight Level (FL)</label>
+            <input
+              type="text"
+              value={preferredFlightLevel}
+              onChange={(e) => setPreferredFlightLevel(e.target.value)}
+              placeholder="e.g. FL370, 390"
+              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-bold rounded-xl px-3 py-2"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[9px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Optimizer Objective</label>
+            <select
+              value={optimizationCriteria}
+              onChange={(e) => setOptimizationCriteria(e.target.value)}
+              disabled={optimizing}
+              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-xs font-bold rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="balanced">Balanced</option>
+              <option value="cheapest">Cheapest</option>
+              <option value="secure">Secure</option>
+              <option value="fastest">Fastest</option>
+              <option value="jeppeson">Jeppeson Route</option>
+              <option value="high-max-airfield">High Max Airfield</option>
+              <option value="min-firs">Min FIRs</option>
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button
+              onClick={handleOptimize}
+              disabled={optimizing}
+              className="w-full bg-indigo-600 text-white px-4 py-2 h-[34px] rounded-xl font-bold text-xs hover:bg-indigo-700 transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-md shadow-indigo-600/10"
+            >
+              {optimizing ? <Loader2 className="animate-spin" size={14} /> : <Zap size={14} />}
+              {optimization ? 'Re-Optimize' : 'Optimize Now'}
+            </button>
+          </div>
         </div>
       </div>
 

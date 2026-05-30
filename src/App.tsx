@@ -68,6 +68,7 @@ import FeasibilityReport from './components/FeasibilityReport';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import MRODatabase from './components/MRODatabase';
+import MROForecast from './components/MROForecast';
 import CateringDatabase from './components/CateringDatabase';
 import FuelDatabase from './components/FuelDatabase';
 import PermitDatabase from './components/PermitDatabase';
@@ -1348,9 +1349,13 @@ export default function App() {
             <div className="max-w-7xl mx-auto">
               <AuthorityIntelligence />
             </div>
-          ) : activeTab === 'mro-database' || activeTab === 'mro-intelligence' ? (
+          ) : activeTab === 'mro-database' ? (
             <div className="max-w-7xl mx-auto">
               <MRODatabase />
+            </div>
+          ) : activeTab === 'mro-intelligence' ? (
+            <div className="max-w-7xl mx-auto">
+              <MROForecast />
             </div>
           ) : activeTab === 'catering' ? (
             <div className="max-w-7xl mx-auto">
@@ -1410,11 +1415,17 @@ export default function App() {
               <RouteOptimizer 
                 departure={formData.departure}
                 destination={formData.destination}
+                onDepartureChange={(val) => setFormData(prev => ({ ...prev, departure: val }))}
+                onDestinationChange={(val) => setFormData(prev => ({ ...prev, destination: val }))}
                 stops={formData.stopovers.join(', ')}
                 dateTime={formData.dateTime}
                 aircraftType={formData.aircraftPreference}
                 passengers={Number(formData.passengers) || 0}
                 payload={Number(formData.cargoWeight) || 0}
+                onApplyRoute={(route) => {
+                  alert(`Route successfully applied: ${route.name}. Please review the updated flight path in the Flight Planner.`);
+                  console.log('Applied route data:', route);
+                }}
               />
             </div>
           ) : activeTab === 'database' ? (

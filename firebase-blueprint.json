@@ -396,6 +396,32 @@
       },
       "required": ["name", "createdAt", "legs"]
     },
+    "RouteTemplate": {
+      "title": "RouteTemplate",
+      "description": "Reusable multi-leg route templates created by users.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" },
+        "description": { "type": "string" },
+        "legs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "from": { "type": "string" },
+              "to": { "type": "string" },
+              "aircraftType": { "type": "string" }
+            },
+            "required": ["id", "from", "to"]
+          }
+        }
+      },
+      "required": ["name", "createdAt", "legs", "userId"]
+    },
     "FlightLog": {
       "title": "FlightLog",
       "description": "Historical flight log for a specific aircraft listing.",
@@ -612,6 +638,7 @@
     "/crew_members/{id}": { "schema": { "$ref": "CrewMember" }, "description": "Crew member database" },
     "/duty_logs/{id}": { "schema": { "$ref": "DutyLog" }, "description": "Duty time logs" },
     "/flight_plans/{id}": { "schema": { "$ref": "FlightPlan" }, "description": "Multi-leg flight plans" },
+    "/route_templates/{id}": { "schema": { "$ref": "RouteTemplate" }, "description": "Reusable multi-leg route templates" },
     "/flight_logs/{id}": { "schema": { "$ref": "FlightLog" }, "description": "Historical flight logs for aircraft" },
     "/availability_intelligence/{id}": { "schema": { "$ref": "AIIntelligenceCache" }, "description": "AI aircraft availability cache" },
     "/operator_enrichment/{id}": { "schema": { "$ref": "AIIntelligenceCache" }, "description": "AI operator data enrichment cache" },
